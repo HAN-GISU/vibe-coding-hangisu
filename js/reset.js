@@ -529,6 +529,7 @@
     changeCycle: changeCycle,
     isOff: isOff,
     foldersForGroup: foldersForGroup,
+    inPeriod: inPeriod,
     isTaskDone: isTaskDone,
     evaluateGroup: evaluateGroup,
     periodStatus: periodStatus,

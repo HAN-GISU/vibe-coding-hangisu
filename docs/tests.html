@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>reset.js 테스트</title>
+  <title>reset.js · store.js 테스트</title>
   <link rel="stylesheet" href="../css/style.css">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
@@ -39,7 +39,7 @@
 </head>
 <body>
 <main class="page">
-  <h1>reset.js 테스트</h1>
+  <h1>reset.js · store.js 테스트</h1>
   <p class="sub">개발용 검증 페이지입니다(앱 화면이 아닙니다). 시각은 한국 시간대 기준이고, 테스트는 시각을 직접 넘기므로 <code>?now=</code>의 영향을 받지 않습니다.</p>
   <div class="summary" id="summary" aria-live="polite">
     <span class="big" id="sum-text">실행 중…</span>
@@ -51,6 +51,7 @@
 </main>
 
 <script src="../js/reset.js"></script>
+<script src="../js/store.js"></script>
 <script>
 (function () {
   'use strict';
@@ -58,6 +59,7 @@
   var R = window.Reset;
   if (!R) {
     out.innerHTML = '<div class="fatal">reset.js를 불러오지 못했습니다. 경로(../js/reset.js)를 확인해 주세요.</div>';
+    if (!window.Store) out.innerHTML += '<div class="fatal">store.js도 불러오지 못했습니다. 경로(../js/store.js)를 확인해 주세요.</div>';
     document.getElementById('sum-text').textContent = '실행하지 못했습니다';
     window.__testResult = { total: 0, passed: 0, failed: 1, failures: ['reset.js 로드 실패'] };
     return;
@@ -638,6 +640,407 @@
     eq('redrawDelay: 지났으면 최소 1ms', function () { return R.redrawDelay([0]); }, 1);
   });
 
+  suite('기간 판정 (inPeriod)', function () {
+    var P = { start: D(10, 15, 5, 0), end: D(10, 16, 5, 0) };
+    eq('시작 시각은 포함', function () { return R.inPeriod(R.formatIso(D(10, 15, 5, 0)), P); }, true);
+    eq('끝 시각은 포함하지 않는다', function () { return R.inPeriod(R.formatIso(D(10, 16, 5, 0)), P); }, false);
+    eq('시작 직전은 밖', function () { return R.inPeriod(R.formatIso(D(10, 15, 4, 59)), P); }, false);
+    eq('기간이 없으면(1회) 시각과 상관없이 true', function () { return R.inPeriod(R.formatIso(D(1, 1, 0, 0)), { start: null, end: null }); }, true);
+    eq('끝이 없는 기간(1회 carry)은 시작 이후 전부', function () { return [R.inPeriod(R.formatIso(D(10, 14, 0, 0)), { start: D(10, 15, 5, 0), end: null }), R.inPeriod(R.formatIso(D(12, 1, 0, 0)), { start: D(10, 15, 5, 0), end: null })]; }, [false, true]);
+    eq('읽을 수 없는 시각은 false', function () { return R.inPeriod('abc', P); }, false);
+  });
+
+  /* ---------- store.js ---------- */
+  var ST = window.Store;
+  var KEY = ST && ST.KEY;
+
+  function sample() {
+    return {
+      version: 1,
+      games: [{
+        id: 'gm1', name: '메이플스토리',
+        cycles: [{ id: 'cd', name: '일일', type: 'daily', time: '05:00' }, { id: 'cw', name: '주간', type: 'weekly', day: 4, time: '06:00' }],
+        levels: ['계정', '캐릭터'],
+        folders: [
+          { id: 'fa1', parentId: null, level: 1, name: '본계정', off: ['tk4'] },
+          { id: 'fc1', parentId: 'fa1', level: 2, name: '캐릭터1', off: [] },
+          { id: 'fc2', parentId: 'fa1', level: 2, name: '캐릭터2', off: [] }
+        ]
+      }],
+      groups: [
+        { id: 'gr1', gameId: 'gm1', name: '일일 퀘스트', cycleId: 'cd', scope: 2, required: null, low: false },
+        { id: 'gr2', gameId: 'gm1', name: '주간 보스', cycleId: 'cw', scope: 2, required: 2, low: false },
+        { id: 'gr3', gameId: 'gm1', name: '계정 주간', cycleId: 'cw', scope: 'game', required: null, low: true }
+      ],
+      tasks: [
+        { id: 'tk1', groupId: 'gr1', name: '아르카나', low: false, createdAt: '2026-10-01T00:00:00' },
+        { id: 'tk2', groupId: 'gr1', name: '모라스', low: false, createdAt: '2026-10-01T00:00:00' },
+        { id: 'tk3', groupId: 'gr2', name: '스우', low: false, createdAt: '2026-10-01T00:00:00' },
+        { id: 'tk4', groupId: 'gr2', name: '데미안', low: false, createdAt: '2026-10-01T00:00:00' },
+        { id: 'tk5', groupId: 'gr3', name: '유니온', low: false, createdAt: '2026-10-01T00:00:00' }
+      ],
+      records: [{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-14T10:00:00' }],
+      groupRecords: [{ groupId: 'gr2', folderId: 'fc2', doneAt: '2026-10-14T11:00:00' }],
+      presets: [{
+        id: 'pr1', name: '내 메이플', savedAt: '2026-10-12T09:00:00',
+        game: {
+          cycles: [{ id: 'pc1', name: '일일', type: 'daily', time: '00:00' }],
+          levels: ['계정'],
+          folders: [{ id: 'pf1', parentId: null, level: 1, name: '본', off: ['pt1'] }],
+          groups: [{ id: 'pg1', name: '일일', cycleId: 'pc1', scope: 1, required: null, low: false }],
+          tasks: [{ id: 'pt1', groupId: 'pg1', name: 'a', low: false }]
+        }
+      }]
+    };
+  }
+
+  // 메모리 가짜 저장소. failSet/failGet을 켜면 저장·읽기가 예외를 던진다.
+  function fake(init) {
+    var m = Object.create(null);
+    if (init) Object.keys(init).forEach(function (k) { m[k] = init[k]; });
+    var s = {
+      items: m, failSet: false, failGet: false, setCalls: 0,
+      getItem: function (k) { if (s.failGet) throw new Error('blocked'); return k in m ? m[k] : null; },
+      setItem: function (k, v) { if (s.failSet) throw new Error('QuotaExceededError'); s.setCalls++; m[k] = String(v); },
+      removeItem: function (k) { delete m[k]; }
+    };
+    return s;
+  }
+  function storeWith(data) { var fs = fake(); fs.items[KEY] = JSON.stringify(data); return { fs: fs, st: ST.create(fs) }; }
+  function oneErr(label, data, expectPart) {
+    ok(label, function () { var r = ST.validateData(data()); return r.ok === false && typeof r.error === 'string' && r.error.indexOf(expectPart) >= 0; });
+  }
+
+  if (!ST) {
+    suite('store.js', function () { ok('store.js를 불러왔다', function () { return false; }); });
+  } else {
+    suite('저장 데이터 검증 (Store.validateData) — 통과하는 것', function () {
+      ok('정상 데이터는 통과한다', function () { return ST.validateData(sample()).ok === true; });
+      ok('빈 데이터(게임·기록 없음)도 통과한다', function () { return ST.validateData({ version: 1, games: [], groups: [], tasks: [], records: [], groupRecords: [], presets: [] }).ok === true; });
+      ok('단계가 없는 게임(levels 빈 배열)과 게임 공통 묶음은 통과한다', function () { var d = sample(); d.games[0].levels = []; d.games[0].folders = []; d.groups = [d.groups[2]]; d.tasks = [d.tasks[4]]; d.records = []; d.groupRecords = []; return ST.validateData(d).ok; });
+      eq('필요 개수: null, 비움(없음), 1, 3은 통과', function () {
+        return [null, undefined, 1, 3].map(function (v) { var d = sample(); if (v === undefined) delete d.groups[1].required; else d.groups[1].required = v; return ST.validateData(d).ok; });
+      }, [true, true, true, true]);
+      ok('기록의 folderId가 null이거나 비어 있어도 통과한다', function () { var d = sample(); d.records = [{ taskId: 'tk5', folderId: null, doneAt: '2026-10-14T10:00' }, { taskId: 'tk5', doneAt: '2026-10-14T11:00' }]; return ST.validateData(d).ok; });
+      ok('scope와 맞지 않는 폴더의 기록도 폴더만 있으면 통과한다 (검사하지 않는다)', function () { var d = sample(); d.records = [{ taskId: 'tk5', folderId: 'fc1', doneAt: '2026-10-14T10:00' }]; return ST.validateData(d).ok; });
+    });
+
+    suite('저장 데이터 검증 (Store.validateData) — 거부하는 것', function () {
+      oneErr('버전이 2', function () { var d = sample(); d.version = 2; return d; }, '버전');
+      oneErr('버전이 없음', function () { var d = sample(); delete d.version; return d; }, '버전');
+      oneErr('객체가 아님(null)', function () { return null; }, '형식');
+      oneErr('필수 목록이 배열이 아님(games)', function () { var d = sample(); d.games = {}; return d; }, '"games"');
+      oneErr('필수 목록이 없음(presets)', function () { var d = sample(); delete d.presets; return d; }, '"presets"');
+      oneErr('게임 id 중복', function () { var d = sample(); var g = JSON.parse(JSON.stringify(d.games[0])); g.folders = []; g.cycles[0].id = 'cx'; g.cycles[1].id = 'cy'; d.games.push(g); return d; }, '겹쳐');
+      oneErr('게임 이름이 비어 있음', function () { var d = sample(); d.games[0].name = '  '; return d; }, '이름');
+      oneErr('이름이 101자', function () { var d = sample(); d.games[0].name = new Array(102).join('가'); return d; }, '이름');
+      oneErr('주기 값이 잘못됨(시각 25:00)', function () { var d = sample(); d.games[0].cycles[0].time = '25:00'; return d; }, '시각은');
+      oneErr('주기 id가 한 게임 안에서 중복', function () { var d = sample(); d.games[0].cycles[1].id = 'cd'; return d; }, '겹쳐');
+      oneErr('주기 이름이 없음', function () { var d = sample(); d.games[0].cycles[0].name = ''; return d; }, '이름');
+      oneErr('단계 이름이 비어 있음', function () { var d = sample(); d.games[0].levels[1] = ''; return d; }, '단계 2');
+      oneErr('폴더 단계가 단계 수보다 큼', function () { var d = sample(); d.games[0].folders[1].level = 3; return d; }, '단계는');
+      oneErr('맨 위 단계 폴더에 상위 폴더가 있음', function () { var d = sample(); d.games[0].folders[0].parentId = 'fc1'; return d; }, '상위 폴더가 없어야');
+      oneErr('아래 단계 폴더의 상위 폴더가 없음', function () { var d = sample(); d.games[0].folders[1].parentId = 'nope'; return d; }, '바로 위 단계');
+      oneErr('아래 단계 폴더의 상위가 같은 단계의 폴더', function () { var d = sample(); d.games[0].folders[2].parentId = 'fc1'; return d; }, '바로 위 단계');
+      oneErr('폴더 id 중복', function () { var d = sample(); d.games[0].folders[2].id = 'fc1'; return d; }, '겹쳐');
+      oneErr('폴더가 끈 항목이 이 게임의 묶음·숙제가 아님', function () { var d = sample(); d.games[0].folders[0].off.push('없는id'); return d; }, '끈 항목');
+      oneErr('묶음의 게임이 없음', function () { var d = sample(); d.groups[0].gameId = 'nope'; return d; }, '게임이 없어요');
+      oneErr('묶음의 리셋 주기가 이 게임에 없음', function () { var d = sample(); d.groups[0].cycleId = 'nope'; return d; }, '리셋 주기가 이 게임에 없어요');
+      oneErr('범위가 단계 수보다 큼(3)', function () { var d = sample(); d.groups[0].scope = 3; return d; }, '범위는');
+      oneErr('범위가 0', function () { var d = sample(); d.groups[0].scope = 0; return d; }, '범위는');
+      oneErr('필요 개수 0', function () { var d = sample(); d.groups[1].required = 0; return d; }, '필요 개수');
+      oneErr('필요 개수 -1', function () { var d = sample(); d.groups[1].required = -1; return d; }, '필요 개수');
+      oneErr('필요 개수 1.5', function () { var d = sample(); d.groups[1].required = 1.5; return d; }, '필요 개수');
+      oneErr('필요 개수가 문자열 "2"', function () { var d = sample(); d.groups[1].required = '2'; return d; }, '필요 개수');
+      oneErr('중요도 낮음이 boolean이 아님', function () { var d = sample(); d.groups[0].low = 'yes'; return d; }, '중요도');
+      oneErr('묶음 id 중복', function () { var d = sample(); d.groups[1].id = 'gr1'; return d; }, '겹쳐');
+      oneErr('숙제의 묶음이 없음', function () { var d = sample(); d.tasks[0].groupId = 'nope'; return d; }, '묶음이 없어요');
+      oneErr('숙제 만든 시각을 읽을 수 없음', function () { var d = sample(); d.tasks[0].createdAt = '어제'; return d; }, '만든 시각');
+      oneErr('숙제 id 중복', function () { var d = sample(); d.tasks[1].id = 'tk1'; return d; }, '겹쳐');
+      oneErr('완료 기록의 숙제가 없음', function () { var d = sample(); d.records[0].taskId = 'nope'; return d; }, '숙제가 없어요');
+      oneErr('완료 기록의 폴더가 없음', function () { var d = sample(); d.records[0].folderId = 'nope'; return d; }, '폴더가 없어요');
+      oneErr('완료 기록의 폴더가 다른 게임의 폴더', function () {
+        var d = sample();
+        d.games.push({ id: 'gm2', name: '다른 게임', cycles: [], levels: ['계정'], folders: [{ id: 'fz', parentId: null, level: 1, name: '계정', off: [] }] });
+        d.records[0].folderId = 'fz';
+        return d;
+      }, '다른 게임의 폴더');
+      oneErr('완료 시각을 읽을 수 없음', function () { var d = sample(); d.records[0].doneAt = '2026-02-30T00:00'; return d; }, '완료 시각');
+      oneErr('묶음 완료 기록의 묶음이 없음', function () { var d = sample(); d.groupRecords[0].groupId = 'nope'; return d; }, '묶음이 없어요');
+      oneErr('묶음 완료 기록의 시각을 읽을 수 없음', function () { var d = sample(); d.groupRecords[0].doneAt = ''; return d; }, '완료 시각');
+      oneErr('내 프리셋에 완료 기록이 들어 있음', function () { var d = sample(); d.presets[0].game.records = []; return d; }, '완료 기록을 넣을 수 없어요');
+      oneErr('내 프리셋의 숙제가 없는 묶음을 가리킴', function () { var d = sample(); d.presets[0].game.tasks[0].groupId = 'nope'; return d; }, '묶음이 없어요');
+      oneErr('내 프리셋 폴더가 끈 항목이 프리셋 안에 없음', function () { var d = sample(); d.presets[0].game.folders[0].off = ['tk1']; return d; }, '끈 항목');
+      oneErr('내 프리셋 저장 시각을 읽을 수 없음', function () { var d = sample(); d.presets[0].savedAt = 'x'; return d; }, '저장한 시각');
+      oneErr('내 프리셋에 게임 내용이 없음', function () { var d = sample(); delete d.presets[0].game; return d; }, '게임 내용');
+      oneErr('상한: 완료 기록이 20만 개를 넘음', function () { var d = sample(); d.records = new Array(ST.LIMIT.records + 1).fill(d.records[0]); return d; }, '"records"');
+      eq('오류는 한 번에 최대 20개까지 알려준다', function () { var d = sample(); d.records = []; for (var i = 0; i < 50; i++) d.records.push({ taskId: 'nope', folderId: null, doneAt: '2026-10-14T10:00' }); return ST.validateData(d).errors.length; }, 20);
+    });
+
+    suite('저장소 읽기 (load, 손상, 접근 불가)', function () {
+      eq('키 이름', function () { return [ST.KEY, ST.BROKEN_KEY]; }, ['vibe-coding-hangisu:data:v1', 'vibe-coding-hangisu:data:v1:broken']);
+      has('처음(저장된 것 없음): empty, 저장 가능, 빈 데이터', function () { var st = ST.create(fake()); return { s: st.status(), games: st.get().games.length }; }, { s: { status: 'empty', persistent: true, error: null }, games: 0 });
+      eq('정상 데이터를 읽는다', function () { var x = storeWith(sample()); return [x.st.status().status, x.st.get()]; }, ['ok', sample()]);
+      eq('알려지지 않은 필드는 메모리 데이터에서 빠진다 (저장소 원문은 그대로)', function () {
+        var d = sample(); d.games[0].zzz = 1; d.extra = 2; var raw = JSON.stringify(d);
+        var fs = fake(); fs.items[KEY] = raw; var st = ST.create(fs);
+        return [JSON.stringify(st.get()) === JSON.stringify(sample()), fs.items[KEY] === raw];
+      }, [true, true]);
+      var BAD = [['JSON이 아님', '{깨진', 'JSON 형식이 아니에요'], ['구조 검증 실패', JSON.stringify(Object.assign(sample(), { version: 1, groups: [Object.assign({}, sample().groups[0], { required: 0 })] })), '필요 개수'], ['모르는 버전', JSON.stringify(Object.assign(sample(), { version: 99 })), '버전']];
+      BAD.forEach(function (b) {
+        has('손상: ' + b[0] + ' → corrupted, 안내 문구, 빈 데이터로 열림', function () { var fs = fake(); fs.items[KEY] = b[1]; var st = ST.create(fs); return { s: st.status(), games: st.get().games.length, hasMsg: st.status().error.indexOf(b[2]) >= 0 }; }, { s: { status: 'corrupted', persistent: true }, games: 0, hasMsg: true });
+        eq('손상: ' + b[0] + ' → 원문이 그대로 남는다 (rawText, 저장소)', function () { var fs = fake(); fs.items[KEY] = b[1]; var st = ST.create(fs); return [st.rawText() === b[1], fs.items[KEY] === b[1], fs.setCalls]; }, [true, true, 0]);
+      });
+      has('저장소 읽기가 막히면 unavailable, 저장 안 됨(persistent:false)', function () { var fs = fake(); fs.failGet = true; return ST.create(fs).status(); }, { status: 'unavailable', persistent: false });
+      has('저장소 자체가 없어도(null) unavailable', function () { return ST.create(null).status(); }, { status: 'unavailable', persistent: false });
+      eq('저장소가 막혀도 메모리에서는 변경과 읽기가 된다 (저장은 안 됨)', function () {
+        var fs = fake(); fs.failGet = true; var st = ST.create(fs);
+        var r = st.update(function (d) { return sample(); });
+        return [r.ok, st.get().games.length, st.status().persistent, fs.setCalls];
+      }, [true, 1, false, 0]);
+      has('기본 인스턴스 Store.status()는 상태 값을 돌려준다 (읽기만 한다)', function () { return ST.status(); }, { persistent: true });
+    });
+
+    suite('손상 데이터가 있을 때 쓰기 차단과 복구', function () {
+      var RAW = '{깨진 원문';
+      function corrupted() { var fs = fake(); fs.items[KEY] = RAW; return { fs: fs, st: ST.create(fs) }; }
+      eq('update는 거부하고 저장소를 건드리지 않는다', function () { var c = corrupted(); var r = c.st.update(function (d) { d.games = []; }); return [r.ok, r.error.indexOf('손상') >= 0, c.fs.items[KEY] === RAW, c.fs.setCalls]; }, [false, true, true, 0]);
+      eq('addRecords도 거부한다', function () { var c = corrupted(); var r = c.st.addRecords([{ taskId: 'x', folderId: null, doneAt: '2026-10-15T05:00' }]); return [r.ok, c.fs.items[KEY] === RAW]; }, [false, true]);
+      eq('올바른 JSON을 가져오면 복구되고, 손상 원문은 백업 키에 남는다', function () {
+        var c = corrupted(); var r = c.st.importJson(JSON.stringify(sample()));
+        return [r.ok, c.st.status().status, c.fs.items[ST.BROKEN_KEY] === RAW, JSON.parse(c.fs.items[KEY]).games.length];
+      }, [true, 'ok', true, 1]);
+      eq('백업을 못 하면 가져오기도 거부하고 손상 원문을 그대로 둔다', function () {
+        var c = corrupted(); c.fs.failSet = true; var r = c.st.importJson(JSON.stringify(sample()));
+        return [r.ok, r.error.indexOf('보관하지 못했어요') >= 0, c.fs.items[KEY] === RAW, ST.BROKEN_KEY in c.fs.items];
+      }, [false, true, true, false]);
+      eq('새로 시작: 원문이 백업 키로 옮겨지고, 빈 데이터로 시작하며, 그 뒤로는 저장된다', function () {
+        var c = corrupted(); var r = c.st.startFresh();
+        var u = c.st.update(function (d) { return sample(); });
+        return [r.ok, c.fs.items[ST.BROKEN_KEY] === RAW, u.ok, c.st.status().status, JSON.parse(c.fs.items[KEY]).games.length];
+      }, [true, true, true, 'ok', 1]);
+      eq('새로 시작: 백업을 못 하면 거부하고 원문을 그대로 둔다', function () { var c = corrupted(); c.fs.failSet = true; var r = c.st.startFresh(); return [r.ok, c.fs.items[KEY] === RAW, c.st.status().status]; }, [false, true, 'corrupted']);
+      eq('새로 시작은 손상이 없을 때는 아무것도 하지 않는다', function () { var x = storeWith(sample()); var before = x.fs.items[KEY]; var r = x.st.startFresh(); return [r.ok, x.fs.items[KEY] === before, ST.BROKEN_KEY in x.fs.items]; }, [false, true, false]);
+      eq('다른 탭이 복구해 주면 따라간다 (손상 → ok)', function () { var c = corrupted(); c.fs.items[KEY] = JSON.stringify(sample()); return [c.st.status().status, c.st.get().games.length]; }, ['ok', 1]);
+    });
+
+    suite('쓰기 길 (update): 실패하면 아무것도 바뀌지 않는다', function () {
+      eq('정상 변경은 저장소에 저장되고 새 스냅샷을 돌려준다', function () {
+        var fs = fake(); var st = ST.create(fs); var before = st.get();
+        var r = st.update(function (d) { Object.assign(d, sample()); });
+        return [r.ok, st.status().status, JSON.parse(fs.items[KEY]).games[0].name, r.data !== before, st.get() === r.data];
+      }, [true, 'ok', '메이플스토리', true, true]);
+      eq('검증에 실패하는 변경(필요 개수 0)은 거부되고 저장소 문자열·스냅샷이 그대로다', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY]; var snap = x.st.get();
+        var r = x.st.update(function (d) { d.groups[1].required = 0; });
+        return [r.ok, r.error.indexOf('필요 개수') >= 0, x.fs.items[KEY] === raw, x.st.get() === snap, x.fs.setCalls];
+      }, [false, true, true, true, 0]);
+      eq('저장 실패(용량 초과)면 거부하고 저장소·스냅샷이 그대로다', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY]; var snap = x.st.get(); x.fs.failSet = true;
+        var r = x.st.update(function (d) { d.games[0].name = '바뀜'; });
+        return [r.ok, r.error.indexOf('저장하지 못했어요') >= 0, x.fs.items[KEY] === raw, x.st.get() === snap, x.st.get().games[0].name];
+      }, [false, true, true, true, '메이플스토리']);
+      eq('변경 함수가 예외를 던지면 거부하고 그대로다', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY];
+        var r = x.st.update(function () { throw new Error('boom'); });
+        return [r.ok, x.fs.items[KEY] === raw, x.fs.setCalls];
+      }, [false, true, 0]);
+      eq('스냅샷은 얼려 있어서 밖에서 고쳐도 저장소와 다음 스냅샷은 바뀌지 않는다', function () {
+        var x = storeWith(sample()); var snap = x.st.get(); var threw = false;
+        try { snap.games[0].name = '해킹'; snap.records.push({}); } catch (e) { threw = true; }
+        return [threw, Object.isFrozen(snap.games[0]), x.st.get().games[0].name, JSON.parse(x.fs.items[KEY]).games[0].name];
+      }, [true, true, '메이플스토리', '메이플스토리']);
+      eq('변경 함수에 주는 draft를 고쳐도(실패한 변경이라도) 스냅샷은 안 바뀐다', function () {
+        var x = storeWith(sample()); var snap = x.st.get();
+        x.st.update(function (d) { d.games[0].name = '임시'; d.groups[1].required = 0; });
+        return x.st.get().games[0].name;
+      }, '메이플스토리');
+      eq('저장할 때 알려지지 않은 필드는 버린다', function () {
+        var x = storeWith(sample());
+        x.st.update(function (d) { d.tasks[0].foo = 'bar'; d.games[0].baz = 1; });
+        var saved = JSON.parse(x.fs.items[KEY]);
+        return ['foo' in saved.tasks[0], 'baz' in saved.games[0]];
+      }, [false, false]);
+      eq('쓸 때 저장소에서 다시 읽는다: 다른 인스턴스(탭)가 저장한 것을 덮어쓰지 않는다', function () {
+        var fs = fake(); fs.items[KEY] = JSON.stringify(sample());
+        var a = ST.create(fs); var b = ST.create(fs);
+        a.addRecords([{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }]);
+        b.addRecords([{ taskId: 'tk2', folderId: 'fc1', doneAt: '2026-10-15T06:01:00' }]);
+        return [JSON.parse(fs.items[KEY]).records.map(function (r) { return r.taskId; }), b.get().records.length, a.get().records.length];
+      }, [['tk1', 'tk1', 'tk2'], 3, 3]);
+    });
+
+    suite('완료 기록 누적 (addRecords, removeRecordsInPeriod)', function () {
+      function recs(st) { return st.get().records.map(function (r) { return r.taskId + '/' + r.folderId + '@' + r.doneAt.slice(5, 16); }); }
+      eq('기록과 묶음 기록이 쌓이고 저장된다', function () {
+        var x = storeWith(sample());
+        var r = x.st.addRecords([{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }, { taskId: 'tk5', folderId: null, doneAt: '2026-10-15T06:01:00' }], [{ groupId: 'gr2', folderId: 'fc1', doneAt: '2026-10-15T06:02:00' }]);
+        var saved = JSON.parse(x.fs.items[KEY]);
+        return [r.ok, saved.records.length, saved.groupRecords.length];
+      }, [true, 3, 2]);
+      eq('Date로 준 시각은 문자열로 저장하고, folderId가 없으면 null이다', function () {
+        var x = storeWith(sample());
+        x.st.addRecords([{ taskId: 'tk5', doneAt: D(10, 15, 6, 0) }]);
+        var last = JSON.parse(x.fs.items[KEY]).records[1];
+        return [last.doneAt, last.folderId];
+      }, ['2026-10-15T06:00:00', null]);
+      eq('한 건이라도 잘못되면 전부 취소된다 (일부만 저장되지 않는다)', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY];
+        var r = x.st.addRecords([{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }, { taskId: '없는숙제', folderId: null, doneAt: '2026-10-15T06:01:00' }]);
+        return [r.ok, x.fs.items[KEY] === raw, x.st.get().records.length];
+      }, [false, true, 1]);
+      eq('같은 (숙제, 폴더)에 기록이 여러 개여도 된다', function () {
+        var x = storeWith(sample());
+        x.st.addRecords([{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }]);
+        x.st.addRecords([{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T07:00:00' }]);
+        return x.st.get().records.length;
+      }, 3);
+      eq('리셋 시점을 지나가도 기록 개수가 줄지 않고, 완료 판정만 바뀐다', function () {
+        var x = storeWith(sample()); var daily5 = x.st.get().games[0].cycles[0];
+        return [D(10, 15, 4, 59), D(10, 15, 5, 0), D(10, 20, 12, 0)].map(function (at) {
+          return [R.isTaskDone({ cycle: daily5, taskId: 'tk1', folderId: 'fc1', records: x.st.get().records, at: at }), x.st.get().records.length];
+        });
+      }, [[true, 1], [false, 1], [false, 1]]);
+
+      var P = { start: D(10, 15, 5, 0), end: D(10, 16, 5, 0) };
+      function withRecords() {
+        var x = storeWith(sample());
+        x.st.update(function (d) {
+          d.records = [
+            { taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-14T10:00:00' }, // 지난 기간
+            { taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }, // 이번 기간, 지울 것
+            { taskId: 'tk1', folderId: 'fc2', doneAt: '2026-10-15T06:00:00' }, // 다른 폴더
+            { taskId: 'tk2', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }, // 다른 숙제
+            { taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T05:00:00' }, // 기간 시작 정각, 지울 것
+            { taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-16T05:00:00' }  // 기간 끝 정각, 다음 기간이라 남길 것
+          ];
+          d.groupRecords = [
+            { groupId: 'gr2', folderId: 'fc1', doneAt: '2026-10-14T11:00:00' }, // 지난 기간
+            { groupId: 'gr2', folderId: 'fc1', doneAt: '2026-10-15T06:30:00' }, // 이번 기간, 지울 것
+            { groupId: 'gr2', folderId: 'fc2', doneAt: '2026-10-15T06:30:00' }  // 다른 폴더
+          ];
+        });
+        return x;
+      }
+      eq('기간 삭제: 그 기간의 그 숙제·그 폴더 기록만 지운다 (지난 기간, 다른 폴더, 다른 숙제, 기간 끝 정각은 남는다)', function () {
+        var x = withRecords();
+        var r = x.st.removeRecordsInPeriod({ taskIds: ['tk1'], groupId: 'gr2', folderIds: ['fc1'], period: P });
+        return [r.ok, r.removed, recs(x.st), x.st.get().groupRecords.map(function (g) { return g.groupId + '/' + g.folderId + '@' + g.doneAt.slice(5, 16); })];
+      }, [true, 3, ['tk1/fc1@10-14T10:00', 'tk1/fc2@10-15T06:00', 'tk2/fc1@10-15T06:00', 'tk1/fc1@10-16T05:00'], ['gr2/fc1@10-14T11:00', 'gr2/fc2@10-15T06:30']]);
+      eq('기간 삭제: 아래 폴더 여러 개를 한 번에', function () {
+        var x = withRecords();
+        var r = x.st.removeRecordsInPeriod({ taskIds: ['tk1'], folderIds: ['fc1', 'fc2'], period: P });
+        return [r.removed, recs(x.st).filter(function (s) { return s.indexOf('tk1') === 0; }).length];
+      }, [3, 2]);
+      eq('기간 삭제: 지울 게 없으면 저장하지 않는다', function () {
+        var x = withRecords(); var calls = x.fs.setCalls; var raw = x.fs.items[KEY];
+        var r = x.st.removeRecordsInPeriod({ taskIds: ['tk3'], folderIds: ['fc1'], period: P });
+        return [r.ok, r.removed, x.fs.setCalls === calls, x.fs.items[KEY] === raw];
+      }, [true, 0, true, true]);
+      eq('기간 삭제: 게임 공통 숙제는 folderIds에 null', function () {
+        var x = storeWith(sample());
+        x.st.addRecords([{ taskId: 'tk5', folderId: null, doneAt: '2026-10-15T06:00:00' }]);
+        var r = x.st.removeRecordsInPeriod({ taskIds: ['tk5'], folderIds: [null], period: P });
+        return [r.removed, x.st.get().records.length];
+      }, [1, 1]);
+      eq('기간 삭제: 1회 주기의 기간({start:null,end:null})이면 그 숙제 기록 전부', function () {
+        var x = withRecords();
+        return x.st.removeRecordsInPeriod({ taskIds: ['tk1'], folderIds: ['fc1'], period: { start: null, end: null } }).removed;
+      }, 4);
+    });
+
+    suite('JSON 내보내기·가져오기', function () {
+      eq('내보내기: 메타와 모든 목록(기록·묶음 기록·프리셋 포함)', function () {
+        var x = storeWith(sample()); var out = JSON.parse(x.st.exportJson(D(10, 15, 5, 7)).text);
+        return [out.app, out.version, out.exportedAt, out.games.length, out.groups.length, out.tasks.length, out.records.length, out.groupRecords.length, out.presets.length];
+      }, ['vibe-coding-hangisu', 1, '2026-10-15T05:07:00', 1, 3, 5, 1, 1, 1]);
+      eq('내보내기 파일명', function () { return storeWith(sample()).st.exportJson(D(10, 15, 5, 7)).filename; }, 'game-homework-20261015-0507.json');
+      eq('내보내기 → 가져오기 왕복: 다른 저장소에 같은 데이터가 생긴다', function () {
+        var a = storeWith(sample()); var b = ST.create(fake());
+        var r = b.importJson(a.st.exportJson().text);
+        return [r.ok, JSON.stringify(b.get()) === JSON.stringify(a.st.get()), r.summary];
+      }, [true, true, { games: 1, groups: 3, tasks: 5, records: 1, groupRecords: 1, presets: 1, dropped: 0 }]);
+      eq('가져오기는 병합이 아니라 교체다 (기존 게임이 사라지고 가져온 게임만 남는다)', function () {
+        var x = storeWith(sample()); var other = sample(); other.games[0].id = 'gm9'; other.games[0].name = '로스트아크'; other.groups.forEach(function (g) { g.gameId = 'gm9'; });
+        other.records = []; other.groupRecords = [];
+        var r = x.st.importJson(JSON.stringify(other));
+        return [r.ok, x.st.get().games.map(function (g) { return g.name; }), JSON.parse(x.fs.items[KEY]).games[0].id];
+      }, [true, ['로스트아크'], 'gm9']);
+      [['JSON이 아님', '{깨진', 'JSON 파일이 아니에요'],
+       ['구조가 틀림(필요 개수 0)', JSON.stringify(Object.assign(sample(), { groups: [Object.assign({}, sample().groups[0], { required: 0 })] })), '필요 개수'],
+       ['모르는 버전', JSON.stringify(Object.assign(sample(), { version: 2 })), '버전'],
+       ['다른 앱의 파일', JSON.stringify(Object.assign(sample(), { app: 'other-app' })), '이 앱에서 내보낸 파일이 아니에요'],
+       ['객체가 아닌 JSON(배열)', '[1,2,3]', '형식']].forEach(function (c) {
+        eq('가져오기 실패(' + c[0] + '): 기존 데이터와 저장소 문자열이 그대로', function () {
+          var x = storeWith(sample()); var raw = x.fs.items[KEY]; var snap = x.st.get();
+          var r = x.st.importJson(c[1]);
+          return [r.ok, r.error.indexOf(c[2]) >= 0, x.fs.items[KEY] === raw, x.st.get() === snap, x.fs.setCalls];
+        }, [false, true, true, true, 0]);
+      });
+      eq('가져오기: 문자열이 아니면 거부', function () { return ST.create(fake()).importJson(null).ok; }, false);
+      eq('가져오기: 6MB를 넘으면 파싱하기 전에 거부', function () { var r = ST.create(fake()).importJson(new Array(ST.LIMIT.text + 2).join(' ')); return [r.ok, r.error.indexOf('너무 커요') >= 0]; }, [false, true]);
+      eq('가져오기: 맨 앞 BOM(윈도우 메모장)은 무시', function () { var b = ST.create(fake()); return b.importJson('﻿' + JSON.stringify(sample())).ok; }, true);
+      eq('가져오기: 저장 실패(용량)면 거부하고 기존 데이터가 그대로', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY]; x.fs.failSet = true;
+        var other = sample(); other.games[0].name = '다른 이름';
+        var r = x.st.importJson(JSON.stringify(other));
+        return [r.ok, r.error.indexOf('저장하지 못했어요') >= 0, x.fs.items[KEY] === raw, x.st.get().games[0].name];
+      }, [false, true, true, '메이플스토리']);
+      eq('가져오기: 알려지지 않은 필드는 버리고 개수를 알려준다 (app, exportedAt은 세지 않는다)', function () {
+        var d = sample(); d.app = 'vibe-coding-hangisu'; d.exportedAt = '2026-10-15T05:00:00'; d.extra = 1; d.games[0].zzz = 2; d.tasks[0].aaa = 3; d.games[0].cycles[0].bbb = 4;
+        var b = ST.create(fake()); var r = b.importJson(JSON.stringify(d));
+        return [r.ok, r.summary.dropped, JSON.stringify(b.get()) === JSON.stringify(sample())];
+      }, [true, 4, true]);
+      eq('가져오기: "__proto__" 키로 Object.prototype을 오염시키지 않는다', function () {
+        var d = sample(); var text = JSON.stringify(d).replace('{"version":1,', '{"__proto__":{"polluted":1},"version":1,');
+        var b = ST.create(fake()); var r = b.importJson(text);
+        var polluted = ({}).polluted !== undefined;
+        delete Object.prototype.polluted;
+        return [r.ok, polluted, r.summary.dropped];
+      }, [true, false, 1]);
+      eq('저장소 접근이 막힌 상태에서도 가져온 데이터는 메모리에 반영된다', function () {
+        var fs = fake(); fs.failGet = true; var b = ST.create(fs);
+        return [b.importJson(JSON.stringify(sample())).ok, b.get().games.length, b.status().status, fs.setCalls];
+      }, [true, 1, 'unavailable', 0]);
+    });
+
+    suite('주기 변경·id (Reset과 함께)', function () {
+      eq('Reset.changeCycle로 만든 carry가 검증을 통과하고, 체크가 유지된다 (carry가 없으면 사라지는 경우)', function () {
+        var x = storeWith(sample());
+        x.st.addRecords([{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T05:10:00' }]);
+        var at = D(10, 15, 5, 30);
+        var old = x.st.get().games[0].cycles[0];
+        var next = R.changeCycle(old, { id: 'cd', name: '일일', type: 'daily', time: '05:20' }, at);
+        var r = x.st.update(function (d) { d.games[0].cycles[0] = next; });
+        var cyc = x.st.get().games[0].cycles[0];
+        var recs = x.st.get().records;
+        function done(c) { return R.isTaskDone({ cycle: c, taskId: 'tk1', folderId: 'fc1', records: recs, at: at }); }
+        return [r.ok, cyc.carry !== undefined, done(cyc), done({ id: 'cd', type: 'daily', time: '05:20' })];
+      }, [true, true, true, false]);
+      eq('1회로 바꾼 주기의 { since } carry도 저장·검증을 통과한다', function () {
+        var x = storeWith(sample());
+        var next = R.changeCycle(x.st.get().games[0].cycles[0], { id: 'cd', name: '일일', type: 'once' }, D(10, 15, 12, 0));
+        var r = x.st.update(function (d) { d.games[0].cycles[0] = next; });
+        return [r.ok, x.st.get().games[0].cycles[0].carry];
+      }, [true, { since: '2026-10-15T05:00:00' }]);
+      eq('newId: 접두어로 시작하고 기존 id와 겹치지 않는다', function () {
+        var x = storeWith(sample()); var id = x.st.newId('gm');
+        var all = [id.indexOf('gm_') === 0, id !== 'gm1'];
+        return all;
+      }, [true, true]);
+      eq('newId: 우연히 같은 id가 나오면 다시 뽑는다', function () {
+        var origRandom = Math.random, origNow = Date.now, seq = [0.5, 0.25], i = 0;
+        try {
+          Date.now = function () { return 1000; }; Math.random = function () { return seq[i++ % seq.length]; };
+          var first = 'x_' + (1000).toString(36) + (0.5).toString(36).slice(2, 8);
+          var x = storeWith(sample());
+          x.st.update(function (d) { d.groups[0].id = first; d.tasks[0].groupId = first; d.tasks[1].groupId = first; d.games[0].folders[0].off = []; });
+          return [x.st.newId('x') !== first, x.st.newId('x').indexOf('x_') === 0];
+        } finally { Math.random = origRandom; Date.now = origNow; }
+      }, [true, true]);
+    });
+  }
+
   /* ---------- 실행과 화면 ---------- */
   function runAll() {
     out.textContent = '';
@@ -682,7 +1085,7 @@
     fb.hidden = failed === 0;
     fb.className = 'badge fail';
     fb.textContent = '실패 ' + failed;
-    document.title = (failed ? '(실패 ' + failed + ') ' : '') + 'reset.js 테스트';
+    document.title = (failed ? '(실패 ' + failed + ') ' : '') + 'reset.js · store.js 테스트';
     var info = R.nowInfo();
     document.getElementById('nowline').textContent = '현재 시각 ' + fmtDate(info.date) + (info.isTest ? ' (테스트 시각)' : '') + (info.error ? ' · ' + info.error : '');
     window.__testResult = { total: total, passed: passed, failed: failed, failures: failures };
