@@ -60,7 +60,11 @@
     .n-item { fill: var(--foreground); font-size: 11.5px; }
     .tbd-box { fill: none; stroke: var(--muted-foreground); stroke-width: 1; stroke-dasharray: 4 3; }
     .tbd-text { fill: var(--muted-foreground); font-size: 11px; font-style: italic; }
-    .bus-label { fill: var(--muted-foreground); font-size: 11px; }
+    .dev-box { fill: none; stroke: var(--muted-foreground); stroke-width: 1; stroke-dasharray: 6 4; }
+    .dev-title { fill: var(--muted-foreground); font-size: 12px; }
+    .dev-note { fill: var(--muted-foreground); font-size: 11.5px; }
+    .edge.dev { stroke-dasharray: 5 4; }
+    .node.dev rect { stroke-dasharray: 4 3; }
     .packet circle { fill: var(--primary); stroke: var(--sidebar-primary); stroke-width: 4; }
     .packet.alt circle { fill: var(--destructive); }
     .packet text { fill: var(--foreground); font-size: 12px; font-weight: 600; text-anchor: middle; paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
@@ -125,7 +129,7 @@
 
   <div class="scroller" id="scroller">
     <noscript><p style="padding:16px">이 도식은 JavaScript가 켜져 있어야 그려집니다. 아래 표와 목록은 그대로 읽을 수 있습니다.</p></noscript>
-    <svg class="diagram" id="diagram" viewBox="0 0 1160 640" role="img" aria-labelledby="dg-title dg-desc">
+    <svg class="diagram" id="diagram" viewBox="0 0 1160 730" role="img" aria-labelledby="dg-title dg-desc">
       <title id="dg-title">시스템 구성도</title>
       <desc id="dg-desc">왼쪽의 사용자 입력, 화면 HTML, 화면 코드 JS와 공통 UI(ui.js), 공통 모듈 reset.js와 store.js와 presets.js, 오른쪽 localStorage 순으로 이어지는 구성도. 자세한 내용은 아래 표와 단계 목록에 글로 있다.</desc>
     </svg>
@@ -151,7 +155,7 @@
         <tr><td>index.html</td><td>메인 화면. 왼쪽(폰에서는 위)에 급한 순서 사이드바, 오른쪽에 게임 목록. 숙제 체크, 한 번에 체크, 숙제 메모(✎)</td><td>4·5·9·10단계</td><td>4장</td></tr>
         <tr><td>settings.html</td><td>게임·리셋 주기·단계·폴더·묶음·숙제 편집, 프리셋 불러오기·내 프리셋 저장·이름 바꾸기·삭제, 데이터 백업(JSON 내보내기·가져오기)</td><td>3·7·8단계</td><td>4장</td></tr>
         <tr><td>history.html</td><td>숙제별 지난 기간 함/안함/묶음 달성. 숙제마다 최신 10개와 [더 보기]</td><td>6단계</td><td>3·4장</td></tr>
-        <tr><td>tests.html</td><td>reset.js·store.js·ui.js·presets.js의 테스트와 통과·실패·건너뜀 표시. 7장 표와 presets.js 대조, ?v= 캐시 값 검사 포함. 시험 코드는 이 파일 안에 둠</td><td>1단계부터</td><td>5장</td></tr>
+        <tr><td>tests.html</td><td>앱 화면이 아닌 개발용 검증 페이지(도식 아래 점선 칸). reset.js·store.js·ui.js·presets.js의 테스트와 통과·실패·건너뜀 표시. 7장 표와 presets.js 대조, ?v= 캐시 값 검사 포함. 시험 코드는 이 파일 안에 둠</td><td>1단계부터</td><td>5장</td></tr>
         <tr><td>main.js<br>settings.js<br>history.js</td><td>각 화면의 코드. 판정은 하지 않고 reset.js·store.js를 호출만 함. main.js는 같은 요소의 글자·체크만 바꾸는 방식으로 다시 그리고(누르는 중·창이 열린 동안은 미룸), settings.js는 presets.js를 불러옴</td><td>4·5·9·10 / 3·7·8 / 6단계</td><td>2-2, 5장</td></tr>
         <tr><td>ui.js</td><td>세 화면 공통: 메뉴, 테스트 시각 표시, 저장소 안내·손상 배너, 확인 창(Dialog), 날짜 글자, JSON 내보내기·가져오기 흐름. 계산은 하지 않음</td><td>3·7단계</td><td>5장</td></tr>
         <tr><td>reset.js</td><td>리셋 주기 계산, 완료 판정(evaluateGroup·evaluateGame), 급한 순서(buildUrgent), 기록(buildHistory·listHistoryPeriods), 남은 기간, <code>changeCycle</code>·<code>carry</code>, <code>now()</code>. 계산의 단일 기준(SoT)</td><td>1·4·5·6단계</td><td>2-2, 3장</td></tr>
@@ -175,7 +179,7 @@
       <li>내 프리셋 저장·이름 바꾸기·삭제: settings.js → store.js → localStorage. 완료 기록과 주기의 carry는 넣지 않음, 숙제 메모는 같이 저장 <span class="tag">4장, 8·10단계</span></li>
       <li>기록 화면 열기: history.js → store.js로 읽기, reset.js의 기간 나누기·함/안함 계산(<code>buildHistory</code>). 리셋 순간에 새 기간 줄이 생김 <span class="tag">6단계</span></li>
       <li>급한 순서 사이드바: main.js → reset.js <code>buildUrgent</code>(<code>evaluateGame</code> 결과 재사용). 폰 폭에서는 접힌 채 앞 3줄과 "외 N줄" <span class="tag">5·9단계</span></li>
-      <li>테스트 실행: tests.html → reset.js·store.js·ui.js·presets.js. HTTP로 열면 ../CLAUDE.md의 7장과 HTML의 ?v= 값도 읽어 대조 <span class="tag">5장</span></li>
+      <li>테스트 실행: tests.html(앱 화면이 아닌 개발용 검증 페이지라 도식 아래 점선 칸에 따로 둠) → reset.js·store.js·ui.js·presets.js. HTTP로 열면 ../CLAUDE.md의 7장과 HTML의 ?v= 값도 읽어 대조 <span class="tag">5장</span></li>
     </ul>
   </div>
 
@@ -207,7 +211,7 @@
     { id: 'json',   x: 10,  y: 440, w: 150, h: 70,  kind: 'io',     t: 'JSON 파일',     s: '내보내기 · 가져오기 (형식 v1)', k: '7단계' },
     { id: 'idx',    x: 210, y: 80,  w: 170, h: 70,  kind: 'screen', t: 'index.html',    s: '메인 화면 (+ 숙제 메모)', k: '4·5·9·10단계' },
     { id: 'hh',     x: 210, y: 180, w: 170, h: 70,  kind: 'screen', t: 'history.html',  s: '기록 화면', k: '6단계' },
-    { id: 'tst',    x: 210, y: 310, w: 170, h: 70,  kind: 'screen', t: 'tests.html',    s: '테스트 (코드는 이 파일 안)', k: '1단계부터' },
+    { id: 'tst',    x: 220, y: 652, w: 180, h: 56,  kind: 'dev',    t: 'tests.html',    s: '테스트 (코드는 이 파일 안)', k: '' },
     { id: 'sh',     x: 210, y: 440, w: 170, h: 70,  kind: 'screen', t: 'settings.html', s: '설정 · 프리셋 · 백업', k: '3·7·8단계' },
     { id: 'mj',     x: 430, y: 80,  w: 150, h: 70,  kind: 'js',     t: 'main.js',       s: '목록 · 사이드바 · 메모', k: '4·5·9·10단계' },
     { id: 'hj',     x: 430, y: 180, w: 150, h: 70,  kind: 'js',     t: 'history.js',    s: '기록 화면 코드', k: '6단계' },
@@ -236,7 +240,6 @@
     ub4:   'M185,330 V460',
     s_idx: 'M185,100 H210',
     s_hh:  'M185,200 H210',
-    s_t:   'M185,330 H210',
     s_sh:  'M185,460 H210',
     j_sh:  'M160,487 H210',
     e_im:  'M380,115 H430',
@@ -244,7 +247,7 @@
     e_ss:  'M380,475 H430',
     c_main:'M580,115 H630',
     c_hj:  'M580,215 H630',
-    c_t:   'M380,345 H630',
+    dev_t: 'M400,680 H785 V610',
     c_sj:  'M580,475 H630',
     bus_a: 'M630,115 V150',
     bus_b: 'M630,150 V215',
@@ -401,13 +404,13 @@
   var edgeEls = {};
   var gEdges = mk('g', {}, svg);
   Object.keys(EDGES).forEach(function (id) {
-    edgeEls[id] = mk('path', { d: EDGES[id], 'class': 'edge' }, gEdges);
+    edgeEls[id] = mk('path', { d: EDGES[id], 'class': 'edge' + (id.indexOf('dev_') === 0 ? ' dev' : '') }, gEdges);
   });
 
-  // 호출선 이름표
-  var bl = text(svg, 0, 0, 'bus-label', '호출선');
-  bl.setAttribute('transform', 'translate(645,300) rotate(-90)');
-  bl.setAttribute('text-anchor', 'middle');
+  // 개발용 검증 칸: 앱 흐름과 따로 보이도록 점선으로 둘러싼다 (앱 화면이 아님)
+  mk('rect', { x: 200, y: 628, width: 950, height: 90, rx: 10, 'class': 'dev-box' }, svg);
+  text(svg, 214, 646, 'dev-title', '개발용 검증 (앱 화면 아님)');
+  text(svg, 420, 672, 'dev-note', 'reset.js · store.js · ui.js · presets.js 를 검사', 'start');
 
   var nodeEls = {};
   var nodeById = {};
