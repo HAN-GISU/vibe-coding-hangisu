@@ -2,8 +2,10 @@
  * 기록 화면 (history.html): 숙제마다 지난 기간별 함/안함을 보여 준다. (CLAUDE.md 3장 "지난 기간 기록", 4장 3번)
  * 기간 나누기와 판정은 모두 Reset.buildHistory가 하고, 이 파일은 그 결과를 그리기만 한다. 읽기 전용이다.
  *
- * 다시 그리기: 결과가 바뀌었을 때만 DOM을 새로 만든다. 펼침 상태는 사용자가 직접 바꾼 것만 기억하고
- * (기본은 놓친 것이 있으면 펼침), "더 보기"로 늘린 개수는 이 페이지가 열려 있는 동안만 기억한다.
+ * 다시 그리기: 모델은 언제나 같은 길(refresh)로 새로 계산한다. 구조(게임·구획·묶음·숙제의 순서와 이름)가 바뀌면 전체를 새로
+ * 그리고, 아니면 숙제마다 서명이 달라진 것만 그 숙제 칸을 바꿔 끼운다("더 보기"도, 리셋 직후 갱신도 같은 길이다).
+ * 펼침 상태는 사용자가 직접 바꾼 것만 기억하고(기본은 놓친 것이 있으면 펼침), "더 보기"로 늘린 개수는 이 페이지가
+ * 열려 있는 동안만 기억한다.
  */
 (function () {
   'use strict';
@@ -12,11 +14,13 @@
   var host = document.getElementById('history');
 
   var state = {
-    sig: null,
-    model: null,
-    index: Object.create(null), // 숙제 키 → { gm, t, at } (펼칠 때 만들거나 "더 보기"로 그 숙제만 바꿀 때 쓴다)
-    limits: Object.create(null), // "숙제id/폴더id" → 보여 줄 개수
-    open: Object.create(null),   // 숙제 키 → 사용자가 정한 펼침 (정하지 않았으면 기본값)
+    struct: null,                  // 마지막으로 그린 구조의 서명
+    taskSigs: Object.create(null), // 숙제 키 → 마지막으로 그린 내용의 서명
+    els: Object.create(null),      // 숙제 키 → <details> 요소 (선택자를 쓰지 않고 키로 바로 찾는다)
+    index: Object.create(null),    // 숙제 키 → { gm, t, at } (접힌 숙제를 열 때 줄을 만든다)
+    limits: Object.create(null),   // "숙제id/폴더id"(buildHistory의 키) → 보여 줄 개수
+    open: Object.create(null),     // 숙제 키 → 사용자가 정한 펼침 (정하지 않았으면 기본값)
+    focusKey: null,                // 다시 그린 뒤 포커스를 돌려 줄 숙제 키
     timer: null,
     pressed: false,
     pressedAt: 0
@@ -55,9 +59,11 @@
     ]);
   }
 
+  function taskKey(gm, t) { return gm.game.id + '/' + t.key; }
+
   // 숙제 하나의 기간 줄 목록 (펼친 것만 만든다. 접힌 것은 열 때 만든다)
   function rowsBody(gm, t, at) {
-    var key = gm.game.id + '/' + t.key;
+    var key = taskKey(gm, t);
     var rows = t.rows.map(function (r) {
       var v = statusView(r, at);
       return el('li', { class: 'hrow' + (r.period.isCurrent ? ' is-current' : '') }, [
@@ -67,7 +73,7 @@
     });
     var body = [el('ul', { class: 'hrows' }, rows)];
     if (t.more) {
-      body.push(el('button', { type: 'button', class: 'btn btn-sm', 'data-more': key, 'data-limit-key': t.key, 'data-shown': String(t.shown), text: STEP + '개 더 보기' }));
+      body.push(el('button', { type: 'button', class: 'btn btn-sm', 'data-more': key, 'data-shown': String(t.shown), text: STEP + '개 더 보기' }));
     } else if (t.truncated) {
       body.push(el('p', { class: 'muted hnote', text: '더 오래된 기간은 생략했어요 (최근 1000개까지 보여요).' }));
     }
@@ -75,15 +81,15 @@
   }
 
   function taskBlock(gm, t, at) {
-    var key = gm.game.id + '/' + t.key;
+    var key = taskKey(gm, t);
     state.index[key] = { gm: gm, t: t, at: at };
     var isOpen = key in state.open ? state.open[key] : t.missed > 0;
-    var bodyEl = el('div', { class: 'htask-body' }, isOpen ? rowsBody(gm, t, at) : []);
     var d = el('details', { class: 'htask', 'data-key': key }, [
       el('summary', {}, [el('span', { class: 'htask-name', text: t.task.name }), t.task.low ? badge('낮음') : null, el('span', { class: 'htask-sum' + (t.missed > 0 ? ' has-missed' : ''), text: summaryText(t) })]),
-      bodyEl
+      el('div', { class: 'htask-body' }, isOpen ? rowsBody(gm, t, at) : [])
     ]);
     if (isOpen) d.open = true;
+    state.els[key] = d;
     return d;
   }
 
@@ -112,6 +118,7 @@
 
   function render(model, at) {
     host.textContent = '';
+    state.els = Object.create(null);
     state.index = Object.create(null);
     if (!model.games.length) {
       var corrupted = Store.status().status === 'corrupted';
@@ -123,6 +130,25 @@
     model.games.forEach(function (gm) { host.appendChild(gameCard(gm, at)); });
   }
 
+  /* ---------- 서명 (무엇이 바뀌었는지 비교한다. 화면 글자에 영향을 주는 값만, 배열을 JSON으로 만든다) ---------- */
+
+  // 구조: 게임·구획·묶음·숙제의 순서와 이름, 지금 연도(날짜 앞의 YYYY/가 달라진다)
+  function structSigOf(model, year) {
+    return JSON.stringify([year, model.games.map(function (gm) {
+      return [gm.game.id, gm.game.name, gm.noFolderGroups.map(function (g) { return [g.id, g.name]; }), gm.sections.map(function (s) {
+        return [s.key, s.pathText, s.groups.map(function (g) {
+          return [g.group.id, g.group.name, g.group.low, g.cycle ? g.cycle.name : null, g.tasks.map(function (t) { return t.key; })];
+        })];
+      })];
+    })]);
+  }
+
+  function taskSigOf(t, year) {
+    return JSON.stringify([year, t.task.name, t.task.low, t.shown, t.more, t.truncated, t.missed, t.rows.map(function (r) {
+      return [r.period.start ? r.period.start.getTime() : null, r.period.end ? r.period.end.getTime() : null, r.period.isCurrent, r.period.legacy, r.status, r.doneAt ? r.doneAt.getTime() : null];
+    })]);
+  }
+
   /* ---------- 갱신 ---------- */
 
   function pointerHeld() {
@@ -131,23 +157,18 @@
     return true;
   }
 
-  // 화면에 영향을 주는 값만 이어 붙인 글자 (결과 전체를 JSON으로 바꾸는 것보다 훨씬 싸다)
-  function sigOf(model) {
-    var parts = [];
-    model.games.forEach(function (gm) {
-      parts.push('G' + gm.game.id + ':' + gm.game.name, gm.noFolderGroups.map(function (g) { return g.id + g.name; }).join(','));
-      gm.sections.forEach(function (s) {
-        parts.push('S' + s.key + ':' + s.pathText);
-        s.groups.forEach(function (g) {
-          parts.push('P' + g.group.id + ':' + g.group.name + ':' + g.group.low + ':' + (g.cycle ? g.cycle.name : ''));
-          g.tasks.forEach(function (t) {
-            parts.push('T' + t.key + ':' + t.task.name + ':' + t.task.low + ':' + t.shown + ':' + t.more + ':' + t.truncated + ':' + t.missed + ':' +
-              t.rows.map(function (r) { return (r.period.start ? r.period.start.getTime() : '') + '~' + (r.period.end ? r.period.end.getTime() : '') + r.status + (r.doneAt ? r.doneAt.getTime() : ''); }).join(','));
-          });
-        });
-      });
-    });
-    return parts.join('|');
+  // 지금 포커스가 어느 숙제 칸 안에 있는지 (칸을 바꿔 끼우면 포커스가 사라지므로 되돌려 주려고)
+  function focusedTaskKey() {
+    var a = document.activeElement;
+    var d = a && a.closest ? a.closest('details.htask') : null;
+    return d && host.contains(d) ? d.getAttribute('data-key') : null;
+  }
+
+  function restoreFocus(key) {
+    var d = key ? state.els[key] : null;
+    if (!d) return;
+    var btn = d.querySelector('button[data-more]');
+    (btn || d.querySelector('summary')).focus();
   }
 
   function refresh(force) {
@@ -156,14 +177,35 @@
     if (!force && pointerHeld()) { state.timer = setTimeout(function () { refresh(false); }, 250); return; }
     var d = Store.get();
     var at = Reset.now();
-    var limits = {};
-    Object.keys(state.limits).forEach(function (k) { limits[k] = state.limits[k]; });
-    var model = Reset.buildHistory({ games: d.games, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at, limits: limits });
-    var sig = sigOf(model); // 펼침은 DOM이 이미 사용자가 바꾼 상태라 비교에 넣지 않는다
-    if (sig !== state.sig) {
-      state.sig = sig;
-      state.model = model;
+    var year = at.getFullYear();
+    var model = Reset.buildHistory({ games: d.games, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at, limits: state.limits });
+    var focusKey = state.focusKey || focusedTaskKey();
+    state.focusKey = null;
+
+    var struct = structSigOf(model, year);
+    if (struct !== state.struct) {
+      state.struct = struct;
+      state.taskSigs = Object.create(null);
       render(model, at);
+      model.games.forEach(function (gm) { gm.sections.forEach(function (s) { s.groups.forEach(function (g) { g.tasks.forEach(function (t) { state.taskSigs[taskKey(gm, t)] = taskSigOf(t, year); }); }); }); });
+      restoreFocus(focusKey);
+    } else {
+      // 구조가 같으면 내용이 달라진 숙제 칸만 바꿔 끼운다
+      model.games.forEach(function (gm) {
+        gm.sections.forEach(function (s) {
+          s.groups.forEach(function (g) {
+            g.tasks.forEach(function (t) {
+              var key = taskKey(gm, t), sig = taskSigOf(t, year);
+              if (sig === state.taskSigs[key]) return;
+              state.taskSigs[key] = sig;
+              var old = state.els[key];
+              var fresh = taskBlock(gm, t, at);
+              if (old && old.parentNode) old.parentNode.replaceChild(fresh, old);
+            });
+          });
+        });
+      });
+      restoreFocus(focusKey);
     }
     // 리셋 순간에 새 기간이 생기므로 가장 빠른 리셋 직후에 다시 계산한다 (길어도 60초)
     state.timer = setTimeout(function () { refresh(false); }, Reset.resetDelay(model.remainingMs));
@@ -171,37 +213,15 @@
 
   /* ---------- 입력 ---------- */
 
-  // "더 보기": 새로 계산하되 그 숙제의 칸만 바꿔 끼운다 (전체를 다시 그리지 않는다)
-  function loadMore(key) {
-    clearTimeout(state.timer);
-    var d = Store.get();
-    var at = Reset.now();
-    var model = Reset.buildHistory({ games: d.games, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at, limits: state.limits });
-    var found = null;
-    model.games.forEach(function (gm) {
-      gm.sections.forEach(function (s) { s.groups.forEach(function (g) { g.tasks.forEach(function (t) { if (gm.game.id + '/' + t.key === key) found = { gm: gm, t: t }; }); }); });
-    });
-    var old = host.querySelector('details[data-key="' + key + '"]');
-    var sig = sigOf(model);
-    if (!found || !old) { state.sig = null; refresh(true); return; }
-    var wasOpen = old.open;
-    state.open[key] = true; // 더 보기를 눌렀으니 펼쳐 둔다
-    var fresh = taskBlock(found.gm, found.t, at);
-    old.parentNode.replaceChild(fresh, old);
-    state.sig = sig; // 다른 숙제가 같이 바뀌었다면 다음 갱신(sig 불일치)이 맞춘다
-    state.model = model;
-    var btn = fresh.querySelector('button[data-more]');
-    (btn || fresh.querySelector('summary')).focus();
-    state.timer = setTimeout(function () { refresh(false); }, Reset.resetDelay(model.remainingMs));
-    return wasOpen;
-  }
-
   host.addEventListener('click', function (e) {
     var more = e.target.closest ? e.target.closest('button[data-more]') : null;
     if (more && host.contains(more)) {
-      var lk = more.getAttribute('data-limit-key');
-      state.limits[lk] = (+more.getAttribute('data-shown') || STEP) + STEP;
-      loadMore(more.getAttribute('data-more'));
+      var key = more.getAttribute('data-more'), info = state.index[key];
+      if (!info) return;
+      state.limits[info.t.key] = (+more.getAttribute('data-shown') || STEP) + STEP; // buildHistory의 limits는 숙제id/폴더id 키
+      state.open[key] = true; // 더 보기를 눌렀으니 펼쳐 둔다
+      state.focusKey = key;
+      refresh(true);
       return;
     }
     // 펼침은 사용자가 직접 바꾼 것만 기억한다 (클릭은 열림 상태가 바뀌기 전에 온다)

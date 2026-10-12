@@ -218,8 +218,9 @@
     return year + two(d.getMonth() + 1) + '/' + two(d.getDate()) + (withWeekday ? '(' + WEEKDAYS[d.getDay()] + ')' : '') + ' ' + two(d.getHours()) + ':' + two(d.getMinutes());
   }
 
-  // 기간 한 줄의 글자. 시작·끝이 없는 1회 주기는 "1회 · 기한 없음".
+  // 기간 한 줄의 글자. 시작·끝이 없는 1회 주기는 "1회 · 기한 없음", 주기를 1회로 바꾸기 전 구간은 "1회로 바꾸기 전".
   function formatPeriod(p, at) {
+    if (p.legacy) return '1회로 바꾸기 전';
     if (!p.start || !p.end) return '1회 · 기한 없음';
     return formatWhen(p.start, at, true) + ' ~ ' + formatWhen(p.end, at, true);
   }

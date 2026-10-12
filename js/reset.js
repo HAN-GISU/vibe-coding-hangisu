@@ -425,23 +425,32 @@
 
   /* ---------- 기록 화면 ---------- */
 
-  // 기록 화면용 기간 목록(최신순). listPeriods(주기 자체의 경계)에 carry를 맞춘다.
-  // 맨 앞은 지금 기간 currentPeriod(at)로, 메인 화면 판정과 같은 기간이다.
-  // 지난 기간은 listPeriods의 기간 중 지금 기간 시작보다 앞선 부분만 쓴다: 지금 기간 시작에 걸친 기간은 그 시작까지로 자르고
-  // (빈틈 없음), 지금 기간 안에 들어가는 기간은 뺀다(겹침 없음). 그래서 만든 이후의 모든 시각이 정확히 한 기간에 속한다.
-  // since는 숙제를 만든 시각. 돌려주는 값: { periods: [{start, end, isCurrent}], truncated }
+  // 기록 화면용 기간 목록(최신순). 맨 앞은 지금 기간 currentPeriod(at)로, 메인 화면 판정과 같은 기간이다(carry 포함).
+  // 지난 기간은 지금 기간 시작에서부터 거꾸로, 주기 자체의 경계(plainLast)로 나눈다. 지금 기간 시작에 걸친 기간은
+  // 그 시작에서 잘리고(빈틈도 겹침도 없음), 최종 목록(지금 기간 포함)이 MAX_PERIODS개를 넘지 않게 자른다.
+  // 그래서 만든 이후의 모든 시각이 정확히 한 기간에 속한다.
+  // 1회 주기는 지금 기간이 [carry.since, 끝 없음)이고, 그 앞(주기를 1회로 바꾸기 전)을 한 구간(legacy: true, 시작은 1970년)으로 둔다.
+  // since는 숙제를 만든 시각. 돌려주는 값: { periods: [{start, end, isCurrent, legacy?}], truncated }
   function listHistoryPeriods(c, since, at) {
-    var base = listPeriods(c, since, at);
-    if (!base.periods.length) return { periods: [], truncated: false };
+    var from = parseTime(since);
+    if (from && from.getTime() > at.getTime()) return { periods: [], truncated: false };
     var cur = currentPeriod(c, at);
     var list = [{ start: cur.start, end: cur.end, isCurrent: true }];
-    if (c.type === 'once') return { periods: list, truncated: false };
-    var cStart = cur.start.getTime();
-    base.periods.forEach(function (p) {
-      if (p.end.getTime() <= cStart) list.push({ start: p.start, end: p.end, isCurrent: false });
-      else if (p.start.getTime() < cStart) list.push({ start: p.start, end: cur.start, isCurrent: false });
-    });
-    return { periods: list, truncated: base.truncated };
+    if (c.type === 'once') {
+      if (cur.start && (!from || from.getTime() < cur.start.getTime())) {
+        list.push({ start: new Date(0), end: cur.start, isCurrent: false, legacy: true });
+      }
+      return { periods: list, truncated: false };
+    }
+    var truncated = false;
+    var end = cur.start;
+    while (from && end.getTime() > from.getTime()) {
+      if (list.length >= MAX_PERIODS) { truncated = true; break; }
+      var start = plainLast(c, new Date(end.getTime() - 1));
+      list.push({ start: start, end: end, isCurrent: false });
+      end = start;
+    }
+    return { periods: list, truncated: truncated };
   }
 
   var DEFAULT_HISTORY_LIMIT = 10;
@@ -526,6 +535,7 @@
         st.tasks.forEach(function (t) {
           if (folderId !== null && isOff(game.folders, folderId, t.id)) return;
           var created = parseTime(t.createdAt);
+          if (created && created.getTime() > at.getTime()) return; // 아직 만들지 않은 숙제는 줄이 없다
           var all = st.periods.periods;
           var n = 0; // 이 숙제가 있던 기간 수 (최신순 목록의 앞쪽 n개)
           while (n < all.length && (!created || !all[n].end || created < all[n].end)) n++;
@@ -535,17 +545,20 @@
           for (var i = 0; i < n && rows.length < want; i++) {
             var s = statusOfTask(evAt(st, folderId, i), t.id);
             if (s.status === 'off' || s.status === 'none') continue;
+            // 1회로 바꾸기 전 구간은 기록이 있을 때만 보여 준다 (여러 기간이 섞여 있어서 기록이 없다고 "놓침"이 되면 안 된다)
+            if (all[i].legacy && s.status !== 'done' && s.status !== 'group-checked') continue;
             var status = s.status;
             if (all[i].isCurrent) {
               if (status === 'missed') status = 'pending';
               else if (status === 'missed-group-met') status = 'pending-group-met';
             }
-            rows.push({ period: { start: all[i].start, end: all[i].end, isCurrent: all[i].isCurrent }, status: status, doneAt: s.doneAt });
+            rows.push({ period: { start: all[i].start, end: all[i].end, isCurrent: all[i].isCurrent, legacy: !!all[i].legacy }, status: status, doneAt: s.doneAt });
           }
           var missed = 0;
           rows.forEach(function (r) { if (r.status === 'missed') missed++; });
           out.push({ key: key, task: t, rows: rows, total: n, shown: rows.length, more: i < n,
-            truncated: st.periods.truncated && n === all.length, missed: missed });
+            // 잘렸더라도 이 숙제가 가장 오래된 기간 안에서 만들어졌다면 이 숙제는 잘린 것이 없다
+            truncated: st.periods.truncated && n === all.length && (!created || created.getTime() < all[all.length - 1].start.getTime()), missed: missed });
         });
         return out;
       }
