@@ -11,6 +11,8 @@
 
   var UI = window.UI, Store = window.Store, Reset = window.Reset, el = UI.el;
   var host = document.getElementById('games');
+  var sidebar = document.getElementById('sidebar');
+  var layout = document.querySelector('.main-layout');
 
   var state = {
     key: null,          // 마지막으로 만든 구조의 키
@@ -277,6 +279,56 @@
     });
   }
 
+  /* ---------- 사이드바: 급한 순서 (보기만 한다) ---------- */
+
+  var side = { card: null, list: null, toggle: null, sig: null, open: false };
+
+  function buildSide() {
+    side.toggle = el('button', { type: 'button', class: 'btn btn-sm side-toggle', 'aria-controls': 'urgent-list', 'aria-expanded': 'false', text: '더 보기' });
+    side.toggle.addEventListener('click', function () { side.open = !side.open; applySideOpen(); });
+    side.list = el('div', { class: 'urgent-list', id: 'urgent-list' });
+    side.card = el('section', { class: 'card side-card' }, [
+      el('div', { class: 'card-head side-head' }, [el('h2', { class: 'card-title', text: '급한 순서' }), side.toggle]),
+      el('div', { class: 'card-body' }, [side.list])
+    ]);
+    sidebar.appendChild(side.card);
+  }
+
+  // 좁은 화면에서는 가장 급한 덩어리 하나만 보이고 나머지는 접는다 (CSS가 .is-collapsed로 숨긴다)
+  function applySideOpen() {
+    var many = side.list.children.length > 1;
+    side.list.classList.toggle('is-collapsed', !side.open);
+    side.toggle.hidden = !many;
+    side.toggle.setAttribute('aria-expanded', side.open ? 'true' : 'false');
+    side.toggle.textContent = side.open ? '접기' : '더 보기';
+  }
+
+  function sideItem(it) {
+    var where = it.gameName + ' · ' + it.pathText + ' · ' + it.groupName + (it.progress ? ' (' + it.progress + ')' : '');
+    return el('li', { class: 'urgent-item' }, [el('span', { class: 'u-where', text: where }), el('span', { class: 'u-tasks', text: ': ' + it.taskNames.join(', ') })]);
+  }
+
+  function patchSide(model) {
+    var show = model.games.length > 0;
+    sidebar.hidden = !show;
+    layout.classList.toggle('has-sidebar', show);
+    if (!show) return;
+    if (!side.card) buildSide();
+    var buckets = Reset.buildUrgent(model.games);
+    var sig = JSON.stringify(buckets);
+    if (sig === side.sig) return;
+    side.sig = sig;
+    side.list.textContent = '';
+    if (!buckets.length) side.list.appendChild(el('p', { class: 'empty', text: '급한 숙제가 없어요.' }));
+    buckets.forEach(function (b) {
+      side.list.appendChild(el('div', { class: 'urgent-bucket' }, [
+        el('h3', { class: 'urgent-label', text: b.label }),
+        el('ul', { class: 'urgent-items' }, b.items.map(sideItem))
+      ]));
+    });
+    applySideOpen();
+  }
+
   /* ---------- 표가 넘치면 목록으로 ---------- */
 
   function fitBoards(full) {
@@ -294,6 +346,7 @@
 
   /* ---------- 갱신 시점 ---------- */
 
+  // 사이드바의 남은 시간도 같은 묶음 판정(gg.remainingMs)에서 오므로 따로 더하지 않아도 이 목록에 들어 있다.
   function schedule(model) {
     clearTimeout(state.timer);
     var list = [];
@@ -320,6 +373,7 @@
     if (rebuilt) { buildAll(model); state.key = key; }
     state.model = model;
     patch(model);
+    patchSide(model);
     fitBoards(rebuilt);
     schedule(model);
   }

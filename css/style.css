@@ -371,9 +371,23 @@ table.board { width: 100%; border-collapse: collapse; }
 .board.as-list td.cell.is-off, .board.as-list tr.frow.is-collapsed td.cell, .board.as-list tr.frow.is-collapsed td.pcol { display: none; }
 .board.as-list td.pcol { padding: 0 8px 6px 36px; text-align: left; white-space: normal; }
 
+/* 사이드바: 급한 순서 */
+.has-sidebar #sidebar { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.side-head { display: flex; align-items: center; gap: 8px; }
+.side-head .card-title { flex: 1; }
+.side-toggle { display: none; }
+.urgent-bucket + .urgent-bucket { margin-top: 12px; }
+.urgent-label { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.urgent-items { margin: 0; padding: 0; list-style: none; }
+.urgent-item { padding: 4px 0; font-size: 13px; overflow-wrap: anywhere; }
+.u-where { color: var(--muted-foreground); }
+
 @media (max-width: 860px) {
   .main-layout.has-sidebar { grid-template-columns: 1fr; }
-  .main-layout.has-sidebar #sidebar { order: -1; }
+  .main-layout.has-sidebar #sidebar { order: -1; position: static; max-height: none; overflow: visible; }
+  .side-toggle { display: inline-flex; align-items: center; justify-content: center; }
+  .side-toggle[hidden] { display: none; }
+  .urgent-list.is-collapsed .urgent-bucket:nth-child(n+2) { display: none; }
 }
 /* 폰처럼 좁으면 D-N만 보이고 남은 시간 상세는 스크린리더용으로만 남긴다 */
 @media (max-width: 639px) {
