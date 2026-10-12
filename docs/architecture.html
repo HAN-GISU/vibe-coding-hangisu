@@ -102,7 +102,7 @@
 <main class="doc">
   <h1>시스템 구성도</h1>
   <p class="lead">게임 숙제 체크가 어떤 파일과 저장소로 이루어지고, 데이터가 어디로 움직이는지 보여주는 문서입니다. 앱 화면이 아니며 앱 메뉴와 연결되어 있지 않습니다.</p>
-  <p class="basis">기준: CLAUDE.md(2026-10-12)와 1단계 계획(리셋 주기 <code>carry</code> 포함). 구현이 진행되면 달라질 수 있습니다. 지금 실제로 있는 앱 파일은 준비 중 페이지(<code>index.html</code>)뿐이고, 나머지는 모두 구현 전입니다.</p>
+  <p class="basis">기준: CLAUDE.md(2026-10-12)와 구현 결과(1~10단계, 숙제 메모까지). 아래 파일은 모두 실제로 있고 동작합니다. 숙제 메모(10단계)는 사용자 확인 전 기본안으로 구현했습니다.</p>
 
   <h2>데이터 흐름 재생</h2>
   <div class="controls" id="flow-buttons" role="group" aria-label="흐름 선택">
@@ -110,6 +110,8 @@
     <button class="btn" data-flow="f2" aria-pressed="false">② 열기 → 계산 → 표시</button>
     <button class="btn" data-flow="f3" aria-pressed="false">③ JSON 가져오기</button>
     <button class="btn" data-flow="f4" aria-pressed="false">④ 프리셋 불러오기</button>
+    <button class="btn" data-flow="f5" aria-pressed="false">⑤ 숙제 메모 쓰기</button>
+    <button class="btn" data-flow="f6" aria-pressed="false">⑥ 손상 → 복구</button>
   </div>
   <div class="controls">
     <button class="btn ctl" id="btn-play" type="button">▶ 재생</button>
@@ -125,7 +127,7 @@
     <noscript><p style="padding:16px">이 도식은 JavaScript가 켜져 있어야 그려집니다. 아래 표와 목록은 그대로 읽을 수 있습니다.</p></noscript>
     <svg class="diagram" id="diagram" viewBox="0 0 1160 640" role="img" aria-labelledby="dg-title dg-desc">
       <title id="dg-title">시스템 구성도</title>
-      <desc id="dg-desc">왼쪽의 사용자 입력, 화면 HTML, 화면 코드 JS, 공통 모듈 reset.js와 store.js와 presets.js, 오른쪽 localStorage 순으로 이어지는 구성도. 자세한 내용은 아래 표와 단계 목록에 글로 있다.</desc>
+      <desc id="dg-desc">왼쪽의 사용자 입력, 화면 HTML, 화면 코드 JS와 공통 UI(ui.js), 공통 모듈 reset.js와 store.js와 presets.js, 오른쪽 localStorage 순으로 이어지는 구성도. 자세한 내용은 아래 표와 단계 목록에 글로 있다.</desc>
     </svg>
   </div>
   <p class="hint">← 좌우로 밀어서 전체를 볼 수 있어요. 재생 중에는 지금 단계 쪽으로 자동으로 따라갑니다.</p>
@@ -146,17 +148,18 @@
     <table>
       <thead><tr><th>이름</th><th>하는 일</th><th>구현 단계</th><th>근거</th></tr></thead>
       <tbody>
-        <tr><td>index.html</td><td>메인 화면. 왼쪽에 급한 순 사이드바, 오른쪽에 게임 목록</td><td>0단계 완료(준비 중 페이지) · 4·5단계</td><td>4장</td></tr>
-        <tr><td>settings.html</td><td>게임·리셋 주기·단계·폴더·묶음·숙제 편집, JSON 내보내기·가져오기, 프리셋 불러오기·저장</td><td>3·7·8단계</td><td>4장</td></tr>
-        <tr><td>history.html</td><td>숙제별 지난 기간 함/안함</td><td>6단계</td><td>4장</td></tr>
-        <tr><td>tests.html</td><td>reset.js 등의 테스트와 통과·실패 표시. 시험 코드는 이 파일 안에 둠</td><td>1단계부터</td><td>5장, 1단계 계획</td></tr>
-        <tr><td>main.js<br>settings.js<br>history.js</td><td>각 화면의 코드. 계산은 하지 않고 reset.js를 호출만 함</td><td>4·5 / 3·7·8 / 6단계</td><td>2-2, 5장 파일 구조</td></tr>
-        <tr><td>reset.js</td><td>리셋 주기 계산, 완료 판정, 묶음 완료, 남은 기간, <code>now()</code>. 계산의 단일 기준(SoT). 1단계 계획에는 주기를 바꿔도 체크가 유지되도록 <code>changeCycle</code>과 <code>carry</code>가 들어 있음(CLAUDE.md 3장에는 1단계 구현 때 반영)</td><td>1단계</td><td>2-2, 3장, 1단계 계획</td></tr>
-        <tr><td>store.js</td><td>저장, 불러오기, 가져오기 검증, 완료 기록 누적, 내 프리셋 저장</td><td>2단계 (내 프리셋은 8단계)</td><td>5장</td></tr>
-        <tr><td>presets.js</td><td>기본 프리셋 3개(메이플스토리·로스트아크·작혼) 데이터. 7장 내용 그대로</td><td>8단계</td><td>5장, 7장</td></tr>
-        <tr><td>localStorage</td><td>브라우저 안의 유일한 저장소. 서버는 없음</td><td>2단계부터</td><td>2-1</td></tr>
-        <tr><td>JSON 파일</td><td>내보내기·가져오기용 파일. 완료 기록과 내 프리셋을 전부 포함</td><td>7단계</td><td>3장, 4장</td></tr>
-        <tr><td>주소의 ?now=</td><td>테스트 시각. reset.js의 <code>now()</code>만 읽고, 화면에 "테스트 시각" 표시를 띄움</td><td>1단계</td><td>3장</td></tr>
+        <tr><td>index.html</td><td>메인 화면. 왼쪽(폰에서는 위)에 급한 순서 사이드바, 오른쪽에 게임 목록. 숙제 체크, 한 번에 체크, 숙제 메모(✎)</td><td>4·5·9·10단계</td><td>4장</td></tr>
+        <tr><td>settings.html</td><td>게임·리셋 주기·단계·폴더·묶음·숙제 편집, 프리셋 불러오기·내 프리셋 저장·이름 바꾸기·삭제, 데이터 백업(JSON 내보내기·가져오기)</td><td>3·7·8단계</td><td>4장</td></tr>
+        <tr><td>history.html</td><td>숙제별 지난 기간 함/안함/묶음 달성. 숙제마다 최신 10개와 [더 보기]</td><td>6단계</td><td>3·4장</td></tr>
+        <tr><td>tests.html</td><td>reset.js·store.js·ui.js·presets.js의 테스트와 통과·실패·건너뜀 표시. 7장 표와 presets.js 대조, ?v= 캐시 값 검사 포함. 시험 코드는 이 파일 안에 둠</td><td>1단계부터</td><td>5장</td></tr>
+        <tr><td>main.js<br>settings.js<br>history.js</td><td>각 화면의 코드. 판정은 하지 않고 reset.js·store.js를 호출만 함. main.js는 같은 요소의 글자·체크만 바꾸는 방식으로 다시 그리고(누르는 중·창이 열린 동안은 미룸), settings.js는 presets.js를 불러옴</td><td>4·5·9·10 / 3·7·8 / 6단계</td><td>2-2, 5장</td></tr>
+        <tr><td>ui.js</td><td>세 화면 공통: 메뉴, 테스트 시각 표시, 저장소 안내·손상 배너, 확인 창(Dialog), 날짜 글자, JSON 내보내기·가져오기 흐름. 계산은 하지 않음</td><td>3·7단계</td><td>5장</td></tr>
+        <tr><td>reset.js</td><td>리셋 주기 계산, 완료 판정(evaluateGroup·evaluateGame), 급한 순서(buildUrgent), 기록(buildHistory·listHistoryPeriods), 남은 기간, <code>changeCycle</code>·<code>carry</code>, <code>now()</code>. 계산의 단일 기준(SoT)</td><td>1·4·5·6단계</td><td>2-2, 3장</td></tr>
+        <tr><td>store.js</td><td>저장·불러오기·검증, 쓰기 규칙(다시 읽기 → 변경 → 검증 → 저장), 체크·해제·한 번에 체크, 숙제 메모(<code>setMemo</code>), 가져오기·내보내기, 손상 보관(<code>:broken</code>), 프리셋 불러오기·저장·이름 바꾸기·삭제</td><td>2·4·7·8·10단계</td><td>3장</td></tr>
+        <tr><td>presets.js</td><td>기본 프리셋 3개(메이플스토리·로스트아크·작혼) 데이터. 7장 표 그대로이고 tests.html이 7장과 하나하나 대조</td><td>8단계</td><td>5장, 7장</td></tr>
+        <tr><td>localStorage</td><td>브라우저 안의 유일한 저장소. 키 <code>vibe-coding-hangisu:data:v1</code> 하나에 전체를 JSON 한 덩어리로(깨진 원문은 <code>:broken</code>). 서버는 없음</td><td>2단계부터</td><td>2-1, 3장</td></tr>
+        <tr><td>JSON 파일</td><td>내보내기·가져오기용 파일(<code>game-homework-YYYYMMDD-HHMM.json</code>). 완료 기록·묶음 완료 기록·내 프리셋·숙제 메모 포함</td><td>7단계</td><td>3장, 4장</td></tr>
+        <tr><td>주소의 ?now=</td><td>테스트 시각. reset.js의 <code>now()</code>만 읽고, 세 화면 맨 위에 "테스트 시각" 표시를 띄움. 메뉴·링크가 화면을 옮겨도 이어짐</td><td>1단계</td><td>3·4장</td></tr>
       </tbody>
     </table>
   </div>
@@ -165,28 +168,24 @@
   <div class="box">
     <ul>
       <li>설정 편집(게임·주기·단계·폴더·묶음·숙제 추가·수정·삭제): settings.js → store.js → localStorage <span class="tag">3단계</span></li>
-      <li>리셋 주기 바꾸기: settings.js → reset.js <code>changeCycle</code>이 <code>carry</code>를 계산 → store.js 저장. 이미 한 체크가 사라지거나 되살아나지 않게 함 <span class="tag">1단계 계획 · 3단계 화면</span></li>
-      <li>체크 해제: 이번 기간에 생긴 그 숙제의 기록만 지움. 지난 기간 기록은 건드리지 않음 <span class="tag">3장</span></li>
-      <li>열 머리·폴더 체크(한 번에 체크): 확인 창을 거쳐 기록 여러 개를 남김. 필요 개수 묶음은 묶음 완료 기록 하나만 남김 <span class="tag">3장, 4단계</span></li>
-      <li>JSON 내보내기: store.js → JSON 파일. 완료 기록과 내 프리셋 포함 <span class="tag">7단계</span></li>
-      <li>내 프리셋 저장·이름 바꾸기·삭제: settings.js → store.js → localStorage. 완료 기록은 넣지 않음 <span class="tag">4장, 8단계</span></li>
-      <li>기록 화면 열기: history.js → store.js로 읽기, reset.js의 기간 나누기·함/안함 계산 <span class="tag">6단계</span></li>
-      <li>테스트 실행: tests.html → reset.js(이후 store.js도) <span class="tag">5장</span></li>
+      <li>리셋 주기 바꾸기: settings.js → store.js의 <code>updateCycle</code>이 reset.js <code>changeCycle</code>로 <code>carry</code>를 계산해 저장. 이미 한 체크가 사라지거나 되살아나지 않게 함 <span class="tag">1·3단계</span></li>
+      <li>체크 해제: 이번 기간에 생긴 그 숙제의 기록만 지움. 끈 칸은 체크처럼 오류 <span class="tag">3·4단계</span></li>
+      <li>열 머리·폴더 체크(한 번에 체크): 확인 창을 거쳐 기록 여러 개를 남김. 필요 개수 묶음은 묶음 완료 기록 하나만 남김. 확인 창이 열려 있는 동안 리셋이 지나면 저장하지 않음 <span class="tag">3·4단계</span></li>
+      <li>JSON 내보내기: store.js → JSON 파일(<code>Reset.now()</code> 시각으로 이름을 지음) <span class="tag">7단계</span></li>
+      <li>내 프리셋 저장·이름 바꾸기·삭제: settings.js → store.js → localStorage. 완료 기록과 주기의 carry는 넣지 않음, 숙제 메모는 같이 저장 <span class="tag">4장, 8·10단계</span></li>
+      <li>기록 화면 열기: history.js → store.js로 읽기, reset.js의 기간 나누기·함/안함 계산(<code>buildHistory</code>). 리셋 순간에 새 기간 줄이 생김 <span class="tag">6단계</span></li>
+      <li>급한 순서 사이드바: main.js → reset.js <code>buildUrgent</code>(<code>evaluateGame</code> 결과 재사용). 폰 폭에서는 접힌 채 앞 3줄과 "외 N줄" <span class="tag">5·9단계</span></li>
+      <li>테스트 실행: tests.html → reset.js·store.js·ui.js·presets.js. HTTP로 열면 ../CLAUDE.md의 7장과 HTML의 ?v= 값도 읽어 대조 <span class="tag">5장</span></li>
     </ul>
   </div>
 
-  <h2>미정 (CLAUDE.md에 없어서 정하지 않은 것)</h2>
+  <h2>남은 미정 · 범위 밖</h2>
   <div class="box tbd">
     <ul>
-      <li>localStorage에 쓰는 키 이름과 저장 형식(버전 필드 등)</li>
-      <li>JSON 파일의 형식(버전 필드, 파일 이름 등)</li>
-      <li>localStorage의 데이터가 직접 깨졌을 때 앱이 어떻게 시작하는지 (가져오기 실패 때는 기존 데이터를 유지한다고만 정해져 있음)</li>
-      <li>화면 사이를 오가는 방식(메뉴·링크)</li>
-      <li>메인 화면 빈 상태의 [프리셋 불러오기] 버튼이 무엇을 여는지 (메인에서 창을 띄우는지, 설정 화면으로 가는지). 그래서 main.js와 presets.js의 연결도 미정</li>
-      <li>"테스트 시각" 표시를 어느 화면에 띄우는지</li>
-      <li>화면을 갱신하는 타이머의 주기 (타이머는 갱신용으로만 쓴다는 것만 정해져 있음)</li>
-      <li>화면별로 어떤 js 파일을 어떤 순서로 불러오는지 (5장은 파일의 역할만 정함)</li>
-      <li>남은 기간의 표시 방식(<code>D-2</code> 단독 또는 <code>D-2 · 2일 20시간</code>): 4단계 화면에서 정함</li>
+      <li>숙제 메모의 설계(숙제마다 하나, 메인에서만 쓰고 보기, 300자, 내 프리셋에 복사)는 사용자 확인 전 기본안이다. 바꾸라고 하면 그때 고친다.</li>
+      <li>여러 탭에서 같은 데이터를 동시에 편집하는 경우는 범위 밖이다(마지막 저장이 이김). 저장소가 바뀌면 다른 탭은 60초 안 또는 탭이 다시 보일 때 따라간다.</li>
+      <li>기본 프리셋은 2026-10-12 기준이다. 게임 업데이트로 달라지면 불러온 뒤 사용자가 고친다.</li>
+      <li>저장소를 쓸 수 없는 브라우저(시크릿 모드 등)에서는 메모리에서만 동작한다. 닫으면 사라지므로 JSON으로 내보내라고 안내한다.</li>
     </ul>
   </div>
 
@@ -205,21 +204,22 @@
   var NODES = [
     { id: 'now',    x: 10,  y: 80,  w: 150, h: 70,  kind: 'io',     t: '주소의 ?now=',  s: '테스트 시각 (선택)', k: '1단계' },
     { id: 'user',   x: 10,  y: 227, w: 150, h: 70,  kind: 'io',     t: '사용자',        s: '클릭 · 입력 · 파일 선택', k: '' },
-    { id: 'json',   x: 10,  y: 440, w: 150, h: 70,  kind: 'io',     t: 'JSON 파일',     s: '내보내기 · 가져오기', k: '7단계' },
-    { id: 'idx',    x: 210, y: 80,  w: 170, h: 70,  kind: 'screen', t: 'index.html',    s: '메인 화면', k: '0단계 완료 · 4·5단계' },
+    { id: 'json',   x: 10,  y: 440, w: 150, h: 70,  kind: 'io',     t: 'JSON 파일',     s: '내보내기 · 가져오기 (형식 v1)', k: '7단계' },
+    { id: 'idx',    x: 210, y: 80,  w: 170, h: 70,  kind: 'screen', t: 'index.html',    s: '메인 화면 (+ 숙제 메모)', k: '4·5·9·10단계' },
     { id: 'hh',     x: 210, y: 180, w: 170, h: 70,  kind: 'screen', t: 'history.html',  s: '기록 화면', k: '6단계' },
     { id: 'tst',    x: 210, y: 310, w: 170, h: 70,  kind: 'screen', t: 'tests.html',    s: '테스트 (코드는 이 파일 안)', k: '1단계부터' },
-    { id: 'sh',     x: 210, y: 440, w: 170, h: 70,  kind: 'screen', t: 'settings.html', s: '설정 화면', k: '3·7·8단계' },
-    { id: 'mj',     x: 430, y: 80,  w: 150, h: 70,  kind: 'js',     t: 'main.js',       s: '메인 화면 코드', k: '4·5단계' },
+    { id: 'sh',     x: 210, y: 440, w: 170, h: 70,  kind: 'screen', t: 'settings.html', s: '설정 · 프리셋 · 백업', k: '3·7·8단계' },
+    { id: 'mj',     x: 430, y: 80,  w: 150, h: 70,  kind: 'js',     t: 'main.js',       s: '목록 · 사이드바 · 메모', k: '4·5·9·10단계' },
     { id: 'hj',     x: 430, y: 180, w: 150, h: 70,  kind: 'js',     t: 'history.js',    s: '기록 화면 코드', k: '6단계' },
-    { id: 'sj',     x: 430, y: 440, w: 150, h: 70,  kind: 'js',     t: 'settings.js',   s: '설정 화면 코드', k: '3·7·8단계' },
-    { id: 'reset',  x: 680, y: 70,  w: 210, h: 220, kind: 'js',     t: 'reset.js',      s: '계산의 단일 기준 (SoT)', k: '1단계',
-      items: ['now()  ←  ?now=', 'lastReset · nextReset', 'evaluateGroup (완료 판정)', 'formatRemaining (남은 기간)', 'validateCycle (주기 검증)', 'changeCycle → carry (1단계 계획)'] },
-    { id: 'store',  x: 680, y: 330, w: 210, h: 180, kind: 'js',     t: 'store.js',      s: '저장 · 불러오기 · 검증', k: '2단계 (내 프리셋 8단계)',
-      items: ['완료 기록 누적', '가져오기 구조 검증', '내 프리셋 저장'] },
-    { id: 'presets',x: 680, y: 540, w: 210, h: 70,  kind: 'js',     t: 'presets.js',    s: '기본 프리셋 3개 데이터', k: '8단계' },
+    { id: 'ui',     x: 430, y: 262, w: 150, h: 62,  kind: 'js',     t: 'ui.js',         s: '메뉴 · 창 · 배너 · 백업', k: '3·7단계' },
+    { id: 'sj',     x: 430, y: 440, w: 150, h: 70,  kind: 'js',     t: 'settings.js',   s: '설정 · 프리셋 · 백업', k: '3·7·8단계' },
+    { id: 'reset',  x: 680, y: 70,  w: 210, h: 220, kind: 'js',     t: 'reset.js',      s: '계산의 단일 기준 (SoT)', k: '1·4·5·6단계',
+      items: ['now()  ←  ?now=', 'lastReset · nextReset', 'evaluateGroup · evaluateGame', 'buildUrgent (급한 순서)', 'buildHistory (기록)', 'formatRemaining (남은 기간)', 'changeCycle → carry'] },
+    { id: 'store',  x: 680, y: 330, w: 210, h: 180, kind: 'js',     t: 'store.js',      s: '저장 · 불러오기 · 검증', k: '2·4·7·8·10단계',
+      items: ['체크 · 한 번에 체크 (ops)', '숙제 메모 setMemo (300자)', '프리셋 불러오기 · 저장 (ops)', '가져오기 검증 · 손상 보관', 'JSON 내보내기'] },
+    { id: 'presets',x: 680, y: 540, w: 210, h: 70,  kind: 'js',     t: 'presets.js',    s: '기본 프리셋 3개 (7장 표 그대로)', k: '8단계' },
     { id: 'ls',     x: 950, y: 330, w: 190, h: 180, kind: 'data',   t: 'localStorage',  s: '브라우저 안에만 저장', k: '2단계부터',
-      items: ['게임 · 묶음 · 숙제 · 폴더', '완료 기록 (계속 쌓임)', '묶음 완료 기록', '내 프리셋'], tbd: '키 이름 · 형식: 미정' }
+      items: ['게임 · 묶음 · 숙제 · 폴더', '숙제 메모 (숙제 안)', '완료 기록 · 묶음 완료 기록', '내 프리셋 (메모 포함)', '키 …:data:v1 (+ :broken)'] }
   ];
 
   var COLS = [
@@ -256,7 +256,10 @@
     p:     'M580,500 H650 V575 H680',
     v:     'M785,330 V290',
     ls:    'M890,420 H950',
-    nw:    'M85,80 V36 H785 V70'
+    nw:    'M85,80 V36 H785 V70',
+    c_ui:  'M580,293 H630',
+    bus_ui: 'M630,215 V293',
+    bus_ui2: 'M630,345 V293'
   };
 
   // 경로: 길 id의 목록. '~'가 붙으면 거꾸로 간다.
@@ -271,7 +274,10 @@
     json_settings: ['j_sh'],
     main_reset:    ['c_main', 'bus_a', 'b_reset'],
     main_store:    ['c_main', 'bus_a', 'bus_b', 'bus_c', 'bus_d', 'b_store'],
+    main_ui:       ['c_main', 'bus_a', 'bus_b', 'bus_ui', '~c_ui'],
     sj_store:      ['c_sj', '~bus_e', 'b_store'],
+    sj_ui:         ['c_sj', '~bus_e', '~bus_d', 'bus_ui2', '~c_ui'],
+    store_ui:      ['~b_store', '~bus_d', 'bus_ui2', '~c_ui'],
     sj_presets:    ['p'],
     store_reset:   ['v'],
     store_ls:      ['ls'],
@@ -280,62 +286,92 @@
 
   var FLOWS = {
     f1: { title: '① 숙제 체크 → 완료 기록 저장', steps: [
-      { n: ['user', 'idx'], text: '사용자가 index.html에서 숙제 체크박스를 누른다. 체크하면 바로 완료 처리된다.',
+      { n: ['user', 'idx'], text: '사용자가 index.html에서 숙제 체크박스를 누른다. 체크하면 바로 완료 처리된다. (폴더 여러 곳이 한 번에 바뀔 때는 확인 창을 거친다.)',
         moves: [{ r: R.user_index, l: '체크' }] },
-      { n: ['idx', 'mj'], text: 'index.html의 클릭을 main.js가 받는다.',
+      { n: ['idx', 'mj'], text: 'index.html의 클릭을 main.js가 받는다. 누르는 중에는 화면 갱신을 미룬다.',
         moves: [{ r: R.index_main, l: '클릭' }] },
       { n: ['mj', 'reset', 'now'], text: 'main.js가 완료 시각을 reset.js의 now()로 얻는다. 주소에 ?now=가 있으면 그 시각이고, 없으면 실제 시각이다.',
         moves: [{ r: R.main_reset, l: 'now()?' }, { r: R.now_reset, l: '?now= (있을 때만)' }, { r: rev(R.main_reset), l: 'doneAt' }] },
-      { n: ['mj', 'store'], text: 'main.js가 완료 기록 {taskId, folderId, doneAt}을 store.js에 넘긴다. 완료 여부(true/false)는 저장하지 않고 기록만 저장한다.',
+      { n: ['mj', 'store'], text: 'main.js가 {taskId, folderId, at}을 store.js에 넘긴다. store.js가 칸(끈 칸은 오류)을 검사하고 완료 기록 {taskId, folderId, doneAt}만 만든다. 완료 여부(true/false)는 저장하지 않는다.',
         moves: [{ r: R.main_store, l: '{taskId, folderId, doneAt}' }] },
-      { n: ['store', 'ls'], text: 'store.js가 localStorage의 기록 뒤에 덧붙여 저장한다. 지난 기간 기록은 지우거나 덮어쓰지 않는다.',
+      { n: ['store', 'ls'], text: 'store.js가 다시 읽기 → 변경 → 검증 → 저장 한 번으로 localStorage의 기록 뒤에 덧붙인다. 지난 기간 기록은 지우거나 덮어쓰지 않는다.',
         moves: [{ r: R.store_ls, l: '기록 추가' }] },
-      { n: ['mj', 'idx'], text: 'main.js가 ②와 같은 방법으로 완료 여부를 다시 계산해 화면을 갱신한다. (체크를 해제하면 이번 기간에 생긴 기록만 지운다.)',
+      { n: ['mj', 'idx'], text: 'main.js가 ②와 같은 방법으로 완료 여부를 다시 계산해, 같은 요소의 체크 상태와 글자만 바꾼다(포커스·눌림이 유지됨). 사이드바도 다시 계산한다. (체크를 해제하면 이번 기간에 생긴 기록만 지운다.)',
         moves: [{ r: rev(R.index_main), l: '화면 갱신' }] }
     ] },
     f2: { title: '② 페이지를 열 때 계산 → 화면 표시', steps: [
       { n: ['user', 'idx'], text: '사용자가 index.html을 연다.',
         moves: [{ r: R.user_index, l: '열기' }] },
-      { n: ['idx', 'mj'], text: 'index.html이 main.js를 실행한다.',
+      { n: ['idx', 'mj'], text: 'index.html이 ui.js(메뉴·배너)와 main.js를 실행한다.',
         moves: [{ r: R.index_main, l: '스크립트 실행' }] },
-      { n: ['mj', 'store', 'ls'], text: 'main.js가 store.js를 통해 localStorage에서 게임·묶음·숙제·완료 기록을 읽는다.',
+      { n: ['mj', 'store', 'ls'], text: 'main.js가 store.js를 통해 localStorage에서 게임·묶음·숙제(메모 포함)·완료 기록을 읽는다.',
         moves: [{ r: R.main_store, l: '읽기' }, { r: rev(R.store_ls), l: '저장된 데이터' }, { r: rev(R.main_store), l: '데이터' }] },
       { n: ['mj', 'reset', 'now'], text: '현재 시각을 얻는다. 주소에 ?now=가 있으면 reset.js의 now()가 그 시각을 쓰고, 화면에 "테스트 시각" 표시가 뜬다.',
         moves: [{ r: R.main_reset, l: 'now()?' }, { r: R.now_reset, l: '?now= (있을 때만)' }, { r: rev(R.main_reset), l: '현재 시각' }] },
-      { n: ['mj', 'reset'], text: 'main.js가 시각과 기록을 reset.js에 넘겨 완료 여부, 묶음 진행 상황, 남은 기간, 사이드바 묶음 단위를 계산한다. 판정은 reset.js 한 곳에서만 한다.',
+      { n: ['mj', 'reset'], text: 'main.js가 시각과 기록을 reset.js에 넘겨 완료 여부, 묶음 진행 상황, 남은 기간(evaluateGame), 급한 순서(buildUrgent)를 계산한다. 판정은 reset.js 한 곳에서만 한다.',
         moves: [{ r: R.main_reset, l: '시각 · 기록 · 설정' }, { r: rev(R.main_reset), l: '완료 · 진행 · 남은 기간' }] },
-      { n: ['mj', 'idx'], text: 'main.js가 게임 목록과 사이드바를 그려 index.html에 표시한다. (기록 화면은 history.js가 같은 순서로 reset.js의 기간 계산을 쓴다.)',
+      { n: ['mj', 'idx'], text: 'main.js가 게임 목록과 사이드바를 그려 index.html에 표시한다. 글자가 바뀌는 순간(리셋 시각 포함)과 60초마다, 탭이 다시 보일 때 다시 그린다. (기록 화면은 history.js가 같은 순서로 reset.js의 buildHistory를 쓴다.)',
         moves: [{ r: rev(R.index_main), l: '화면 표시' }] }
     ] },
-    f3: { title: '③ JSON 가져오기 → 검증 → 저장', steps: [
-      { n: ['user', 'sh', 'json'], text: '사용자가 settings.html에서 JSON 파일을 고른다.',
+    f3: { title: '③ JSON 가져오기 → 확인 → 검증 → 저장', steps: [
+      { n: ['user', 'sh', 'json'], text: '사용자가 settings.html의 "데이터 백업" 카드에서 [JSON 가져오기]를 누르고 파일을 고른다.',
         moves: [{ r: R.user_settings, l: '파일 선택' }, { r: R.json_settings, l: 'JSON 파일' }] },
-      { n: ['sh', 'sj'], text: 'settings.js가 파일 내용을 읽는다.',
+      { n: ['sh', 'sj'], text: 'settings.js(공통 ui.js의 가져오기)가 파일 크기를 먼저 본다(아주 큰 것만 거름). 정확한 크기 판정은 읽은 뒤 글자 수로 한다.',
         moves: [{ r: R.settings_sj, l: 'JSON 텍스트' }] },
-      { n: ['sj', 'store'], text: 'settings.js가 내용을 store.js에 넘겨 가져오기를 요청한다.',
+      { n: ['sj', 'ui'], text: 'ui.js가 확인 창을 띄운다: "기존 데이터와 완료 기록이 모두 바뀝니다. 먼저 내보내기를 해 두세요". 창 안의 [먼저 내보내기]로 바로 내려받을 수도 있다.',
+        moves: [{ r: R.sj_ui, l: '확인 창' }, { r: rev(R.sj_ui), l: '[가져오기]' }] },
+      { n: ['sj', 'store'], text: '[가져오기]를 누르면 settings.js가 내용을 store.js에 넘겨 가져오기를 요청한다.',
         moves: [{ r: R.sj_store, l: '가져오기 요청' }] },
-      { n: ['store', 'reset'], text: 'store.js가 구조를 검증한다. 리셋 주기 값은 reset.js의 validateCycle로 확인한다. 검증이 끝나기 전에는 아무것도 저장하지 않는다.',
+      { n: ['store', 'reset'], text: 'store.js가 구조를 검증한다(알려진 필드만 남김). 리셋 주기 값은 reset.js의 validateCycle로 확인한다. 검증이 끝나기 전에는 아무것도 저장하지 않는다.',
         moves: [{ r: R.store_reset, l: 'validateCycle' }, { r: rev(R.store_reset), l: '결과' }] },
-      { n: ['store', 'ls'], text: '검증을 통과하면 기존 데이터를 교체해 localStorage에 저장한다.',
+      { n: ['store', 'ls'], text: '검증을 통과하면 기존 데이터를 교체해 localStorage에 저장한다(병합하지 않음). 성공하면 요약을 보여 주고 화면을 새로 고친다(저장소가 없는 모드는 설정 화면만 다시 그림).',
         moves: [{ r: R.store_ls, l: '교체 저장' }] },
-      { alt: true, n: ['store', 'sj'], text: '검증에 실패하면(대안): localStorage는 건드리지 않고 기존 데이터를 그대로 둔다. 오류는 페이지 안 UI로 알린다.',
+      { alt: true, n: ['store', 'sj'], text: '검증에 실패하면(대안): localStorage는 건드리지 않고 기존 데이터를 그대로 둔다. 어디가 틀렸는지(앞 5개와 "외 N개")를 확인 창 안에서 알린다.',
         moves: [{ r: rev(R.sj_store), l: '오류 안내' }] }
     ] },
     f4: { title: '④ 프리셋 불러오기', steps: [
-      { n: ['user', 'sh'], text: '사용자가 settings.html에서 [프리셋 불러오기]를 누른다. (게임이 하나도 없을 때 메인 화면 빈 상태 안내에도 같은 버튼이 있는데, 그 버튼이 무엇을 여는지는 미정.)',
+      { n: ['user', 'sh'], text: '사용자가 settings.html의 프리셋 카드에서 [불러오기]를 누른다. (게임이 없을 때 메인 빈 상태의 [프리셋 불러오기]는 settings.html?now=…#presets로 이동한다. main.js는 presets.js를 모른다.)',
         moves: [{ r: R.user_settings, l: '프리셋 불러오기' }] },
       { n: ['sh', 'sj'], text: 'settings.js가 클릭을 받는다.',
         moves: [{ r: R.settings_sj, l: '클릭' }] },
-      { n: ['sj', 'presets'], text: 'settings.js가 presets.js에서 기본 프리셋(메이플스토리·로스트아크·작혼)을 가져온다.',
+      { n: ['sj', 'presets'], text: 'settings.js가 presets.js에서 기본 프리셋(메이플스토리·로스트아크·작혼)을 가져온다. 7장 표 그대로다.',
         moves: [{ r: R.sj_presets, l: '기본 프리셋 요청' }, { r: rev(R.sj_presets), l: '기본 프리셋 3개' }] },
       { n: ['sj', 'store', 'ls'], text: '내 프리셋은 store.js가 localStorage에서 읽어 온다. 목록에는 기본 프리셋과 내 프리셋이 함께 나온다.',
         moves: [{ r: R.sj_store, l: '내 프리셋 요청' }, { r: rev(R.store_ls), l: '내 프리셋' }, { r: rev(R.sj_store), l: '목록' }] },
-      { n: ['user', 'sh'], text: '사용자가 하나를 고르고, 확인 창에서 폴더 구조를 들여쓰기로 적는다. 같은 이름의 게임이 있으면 덮어쓰지 않고 "따로 하나 더 추가 / 취소"를 묻는다.',
+      { n: ['user', 'sh'], text: '사용자가 하나를 고르고 확인 창에서 폴더 구조를 들여쓰기로 적는다(내 프리셋에 폴더가 있으면 저장한 구조를 그대로 복사). 같은 이름의 게임이 있으면 덮어쓰지 않고 "따로 하나 더 추가 / 취소"를 묻는다.',
         moves: [{ r: R.user_settings, l: '선택 · 폴더 입력' }] },
-      { n: ['sj', 'store'], text: 'settings.js가 프리셋 내용을 복사해, 원본과 별개의 새 게임으로 store.js에 넘긴다.',
+      { n: ['sj', 'store'], text: 'settings.js가 store.js의 addGameFromPreset에 넘긴다. 새 id로 복사해 원본과 별개의 새 게임을 만들고, 숙제의 만든 시각은 now(), 메모는 복사한다.',
         moves: [{ r: R.sj_store, l: '새 게임 추가' }] },
       { n: ['store', 'ls'], text: 'store.js가 localStorage에 추가만 한다. 기존 게임과 완료 기록은 건드리지 않는다.',
         moves: [{ r: R.store_ls, l: '추가 저장' }] }
+    ] },
+    f5: { title: '⑤ 숙제 메모 쓰기', steps: [
+      { n: ['user', 'idx'], text: '사용자가 index.html에서 숙제 이름 옆 ✎ 버튼을 누른다. (단계 범위 표는 열 머리의 ✎.)',
+        moves: [{ r: R.user_index, l: '✎' }] },
+      { n: ['idx', 'mj'], text: 'main.js가 클릭을 받아 그 숙제의 메모를 읽는다.',
+        moves: [{ r: R.index_main, l: '클릭' }] },
+      { n: ['mj', 'ui'], text: 'ui.js의 창(UI.modal)이 열린다. 입력 칸은 창 안에 있어서 목록이 다시 그려져도 글이 남고, 창이 열려 있는 동안은 화면 갱신도 미뤄진다.',
+        moves: [{ r: R.main_ui, l: '메모 창' }] },
+      { n: ['mj', 'store'], text: '[저장]을 누르면 main.js가 store.js의 setMemo에 글을 넘긴다. 줄바꿈과 앞뒤 공백을 정리하고, 300자를 넘으면 거부하고(창 안에 안내), 비면 메모 필드를 지운다.',
+        moves: [{ r: R.main_store, l: 'setMemo(숙제, 글)' }] },
+      { n: ['store', 'ls'], text: 'store.js가 다시 읽기 → 변경 → 검증 → 저장 한 번으로 그 숙제 안에 memo를 저장한다. 리셋돼도 남는 고정 메모다.',
+        moves: [{ r: R.store_ls, l: 'memo 저장' }] },
+      { n: ['mj', 'idx'], text: 'main.js가 메모 줄의 글자와 hidden만 바꿔 화면에 보여 준다(처음 쓰거나 지워도 목록을 다시 만들지 않음). 글은 항상 글자로만 넣고 줄바꿈은 CSS로 보인다.',
+        moves: [{ r: rev(R.index_main), l: '메모 표시' }] }
+    ] },
+    f6: { title: '⑥ 저장된 데이터가 깨졌을 때 → 복구', steps: [
+      { n: ['store', 'ls'], text: '페이지를 열면 store.js가 localStorage의 원문을 읽다가 깨진 것(JSON이 아니거나 구조 검증 실패)을 알아챈다. 원문은 지우거나 덮어쓰지 않고, 빈 데이터로 열되 쓰기를 막는다.',
+        moves: [{ r: rev(R.store_ls), l: '원문' }] },
+      { n: ['store', 'ui'], text: 'ui.js가 모든 화면 맨 위에 안내를 띄운다: ① 손상된 원문 내려받기 ② 새로 시작 ③ JSON 가져오기로 복구. 설정 화면의 쓰기 버튼도 꺼진다.',
+        moves: [{ r: R.store_ui, l: '손상 상태' }] },
+      { n: ['user', 'sh', 'json'], text: '사용자가 ③ [JSON 가져오기로 복구]를 누르고 이전에 내보낸 파일을 고른다. 확인 창은 앞 문장은 그대로 두고 "손상된 원문은 따로 보관(백업)해 두고 바꿔요"를 보여 준다.',
+        moves: [{ r: R.user_settings, l: '파일 선택' }, { r: R.json_settings, l: 'JSON 파일' }] },
+      { n: ['sj', 'store'], text: 'settings.js(공통 ui.js)가 store.js에 가져오기를 요청한다. 구조 검증을 통과해야 한다.',
+        moves: [{ r: R.sj_store, l: '가져오기 요청' }] },
+      { n: ['store', 'ls'], text: '먼저 손상된 원문을 :broken 키에 옮기고, 옮기지 못하면 가져오지 않는다. 옮긴 뒤에 정상 데이터로 교체 저장하고 화면을 새로 고친다.',
+        moves: [{ r: R.store_ls, l: ':broken 보관 → 교체' }] },
+      { alt: true, n: ['store', 'sj'], text: '보관하지 못하거나 검증에 실패하면(대안): 아무것도 바꾸지 않고 안내만 한다. 손상 원문은 그대로 남는다.',
+        moves: [{ r: rev(R.sj_store), l: '오류 안내' }] }
     ] }
   };
 
@@ -387,8 +423,6 @@
     nodeEls[n.id] = g;
   });
 
-  tbdChip(svg, 10, 518, 150, '파일 형식: 미정');
-  tbdChip(svg, 210, 526, 170, '화면 사이 이동: 미정');
 
   var packet = mk('g', { 'class': 'packet', visibility: 'hidden' }, svg);
   mk('circle', { r: 7 }, packet);
