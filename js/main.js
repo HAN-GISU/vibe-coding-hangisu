@@ -536,7 +536,15 @@
         var r = Store.apply(function (d) { return Store.ops.setMemo(d, taskId, area.value); });
         return r.ok ? { ok: true } : r;
       }
-    }).then(function () { refresh(true); });
+    }).then(function () {
+      refresh(true);
+      // 표 아래 메모 목록에서 열어 메모를 지우면 그 줄이 숨겨져 포커스가 사라진다 → 같은 숙제의 ✎ 버튼으로 옮긴다
+      var a = document.activeElement;
+      if (!a || a === document.body || a.offsetParent === null) {
+        var btns = document.querySelectorAll('.memo-btn[data-memo="' + taskId + '"]');
+        for (var i = 0; i < btns.length; i++) { if (btns[i].offsetParent !== null) { btns[i].focus(); break; } }
+      }
+    });
   }
 
   function onToggle(btn) {

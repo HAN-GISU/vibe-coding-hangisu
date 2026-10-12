@@ -151,13 +151,20 @@
     if (!(t.low === undefined || typeof t.low === 'boolean')) errs.add(label + ': 중요도 낮음은 true 또는 false여야 해요.');
     if (needCreatedAt && !global.Reset.parseTime(t.createdAt)) errs.add(label + ': 만든 시각을 읽을 수 없어요.');
     if (t.memo !== undefined) {
-      if (typeof t.memo !== 'string') errs.add(label + ': 메모는 글이어야 해요.');
-      else if (t.memo.length > LIMIT.memo) errs.add(label + ': 메모는 ' + LIMIT.memo + '자까지예요.');
+      var mm = memoCheck(t.memo);
+      if (!mm.ok) errs.add(label + ': ' + mm.error);
     }
   }
 
   // 메모 글을 저장할 모양으로: 줄바꿈은 LF 하나로, 앞뒤 공백은 자른다. 비면 ''.
-  function cleanMemo(text) { return typeof text === 'string' ? text.replace(/\r\n?/g, '\n').trim() : ''; }
+  // 메모 규칙은 이 함수 하나가 정한다: 글자인지 → 줄바꿈·앞뒤 공백 정리 → 길이. (검증·정규화·setMemo가 같이 쓴다)
+  function memoCheck(text) {
+    if (typeof text !== 'string') return { ok: false, error: '메모는 글이어야 해요.' };
+    var v = text.replace(/\r\n?/g, '\n').trim();
+    if (v.length > LIMIT.memo) return { ok: false, error: '메모는 ' + LIMIT.memo + '자까지예요.' };
+    return { ok: true, value: v };
+  }
+  function cleanMemo(text) { var m = memoCheck(text); return m.ok ? m.value : ''; }
 
   // 폴더의 off가 가리키는 id가 실제 묶음·숙제인지 (validOff: id → true)
   function checkOff(folders, validOff, label, errs) {
@@ -981,9 +988,9 @@
     // 숙제의 메모(고정 메모, 숙제마다 하나)를 바꾼다. 비면 지운다. 같은 값이면 noop.
     function setMemo(d, taskId, text) {
       var t = findTask(d, taskId); if (!t) return fail('숙제를 찾을 수 없어요.');
-      if (typeof text !== 'string') return fail('메모는 글이어야 해요.');
-      var m = cleanMemo(text);
-      if (m.length > LIMIT.memo) return fail('메모는 ' + LIMIT.memo + '자까지예요.');
+      var mc = memoCheck(text);
+      if (!mc.ok) return fail(mc.error);
+      var m = mc.value;
       if (m === (typeof t.memo === 'string' ? t.memo : '')) return { ok: true, noop: true };
       if (m) t.memo = m; else delete t.memo;
       return { ok: true };
