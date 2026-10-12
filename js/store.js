@@ -1141,19 +1141,22 @@
     // 주기·폴더·묶음·숙제를 새 id로 복사한다. 주기의 carry(기록 이력에 딸린 값)는 버리고, 폴더의 끈 항목은 새 id로 다시 잇는다.
     // 돌려주는 값: { cycles, folders, groups(gameId 없음), tasks(createdAt 없음) }
     function cloneContent(cycles, folders, groups, tasks, used) {
+      // 주기 id와 묶음·숙제 id는 종류가 다르니 맵을 따로 둔다 (같은 문자열이어도 섞이지 않게).
+      // 묶음과 숙제의 id는 같은 게임 안에서 겹치지 않으므로 맵 하나를 같이 쓴다 (폴더의 끈 항목이 둘 다 가리킨다).
+      var cycleMap = Object.create(null);
       var idMap = Object.create(null);
-      function fresh(prefix, old) { var id = makeId(prefix, used); idMap[old] = id; return id; }
+      function fresh(prefix, old, map) { var id = makeId(prefix, used); map[old] = id; return id; }
       var outCycles = cycles.map(function (c) {
         var o = JSON.parse(JSON.stringify(c));
         delete o.carry;
-        o.id = fresh('cy', c.id);
+        o.id = fresh('cy', c.id, cycleMap);
         return o;
       });
       var outGroups = groups.map(function (g) {
-        return { id: fresh('gr', g.id), name: g.name, cycleId: idMap[g.cycleId], scope: g.scope, required: g.required === undefined ? null : g.required, low: g.low === true };
+        return { id: fresh('gr', g.id, idMap), name: g.name, cycleId: cycleMap[g.cycleId], scope: g.scope, required: g.required === undefined ? null : g.required, low: g.low === true };
       });
       var outTasks = tasks.map(function (x) {
-        return { id: fresh('tk', x.id), groupId: idMap[x.groupId], name: x.name, low: x.low === true };
+        return { id: fresh('tk', x.id, idMap), groupId: idMap[x.groupId], name: x.name, low: x.low === true };
       });
       var folderMap = Object.create(null);
       var outFolders = folders.map(function (f) { var id = makeId('fo', used); folderMap[f.id] = id; return { id: id, f: f }; }).map(function (x) {
@@ -1176,15 +1179,15 @@
       var n = cleanName(preset.name); if (n.error) return fail(n.error);
       if (d.games.length >= LIMIT.games) return fail('게임은 ' + LIMIT.games + '개까지예요.');
       var pg = preset.game;
-      var same = d.games.some(function (g) { return g.name === n.value; });
-      if (same && o.sameName !== 'add') return { ok: false, needsConfirm: 'sameName', error: '같은 이름의 게임이 이미 있어요.' };
-
+      // 폴더 입력 검증을 같은 이름 확인보다 먼저 한다 (잘못된 입력은 첫 창에서 바로 오류로 나오고 입력이 남는다)
       var nodes = null;
       if (!pg.folders.length && pg.levels.length > 0 && typeof o.folderText === 'string' && o.folderText.trim() !== '') {
         var parsed = parseFolderTree(o.folderText, pg.levels.length);
         if (!parsed.ok) return parsed;
         nodes = parsed.nodes;
       }
+      var same = d.games.some(function (g) { return g.name === n.value; });
+      if (same && o.sameName !== 'add') return { ok: false, needsConfirm: 'sameName', error: '같은 이름의 게임이 이미 있어요.' };
       var used = allIds(d);
       var gid = makeId('gm', used);
       var c = cloneContent(pg.cycles, pg.folders, pg.groups, pg.tasks, used);
@@ -1208,12 +1211,18 @@
 
     // 게임 하나를 "내 프리셋"으로 저장한다 (이름·주기·단계·폴더와 끈 항목·묶음·숙제만. 완료 기록과 주기의 carry는 넣지 않는다).
     // 같은 이름의 프리셋이 있고 mode가 'overwrite'가 아니면 { ok:false, needsConfirm:'sameName', existingId }를 돌려준다.
-    function savePreset(d, gameId, name, mode, at) {
+    // 덮어쓰기('overwrite')는 existingId(첫 호출이 돌려준 것)가 가리키는 프리셋을 덮어쓴다. 그 id가 없으면 이름이 같은 것 중 첫 번째다.
+    function savePreset(d, gameId, name, mode, at, existingId) {
       var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
       if (!validAt(at)) return fail(BAD_AT);
       var n = cleanName(name); if (n.error) return fail(n.error);
       var same = null;
-      d.presets.forEach(function (p) { if (p.name === n.value) same = p; });
+      if (mode === 'overwrite' && existingId !== undefined) {
+        d.presets.forEach(function (p) { if (p.id === existingId) same = p; });
+        if (!same) return fail('덮어쓸 프리셋을 찾을 수 없어요.');
+      } else {
+        for (var pi = 0; pi < d.presets.length && !same; pi++) if (d.presets[pi].name === n.value) same = d.presets[pi];
+      }
       if (same && mode !== 'overwrite') return { ok: false, needsConfirm: 'sameName', existingId: same.id, error: '같은 이름의 프리셋이 이미 있어요.' };
       if (!same && d.presets.length >= LIMIT.presets) return fail('내 프리셋은 ' + LIMIT.presets + '개까지예요.');
       var used = allIds(d);

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>reset.js · store.js 테스트</title>
-  <link rel="stylesheet" href="../css/style.css?v=20261012-14">
+  <link rel="stylesheet" href="../css/style.css?v=20261012-15">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
     .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
@@ -50,10 +50,10 @@
   <div id="out"></div>
 </main>
 
-<script src="../js/reset.js?v=20261012-14"></script>
-<script src="../js/store.js?v=20261012-14"></script>
-<script src="../js/ui.js?v=20261012-14"></script>
-<script src="../js/presets.js?v=20261012-14"></script>
+<script src="../js/reset.js?v=20261012-15"></script>
+<script src="../js/store.js?v=20261012-15"></script>
+<script src="../js/ui.js?v=20261012-15"></script>
+<script src="../js/presets.js?v=20261012-15"></script>
 <script>
 (function () {
   'use strict';
@@ -2210,11 +2210,11 @@
         var e = O.addGameFromPreset(full, mj, { at: PAT });
         return [a.ok, b.ok, c.ok, e.ok, JSON.stringify(d) === s, full.games.length];
       }, [false, false, false, false, true, 100]);
-      eq('저장소에 적용(Store.apply)하면 한 번의 저장이고 다시 읽어도 같다, 같은 이름이면 apply 결과에 needsConfirm이 그대로 온다', function () {
+      eq('저장소에 적용(Store.apply): 성공은 저장소에 쓰기(setItem) 1번, 같은 이름 확인 대기는 쓰기 0번이고 저장 문자열이 그대로다, 결과에 needsConfirm이 그대로 온다', function () {
         var x = storeWith(emptyD()); var r = x.st.apply(function (d) { return O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' }); });
-        var raw = x.fs.items[KEY]; var r2 = x.st.apply(function (d) { return O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' }); });
-        return [r.ok, r2.ok, r2.needsConfirm, x.fs.items[KEY] === raw, JSON.parse(raw).games.length];
-      }, [true, false, 'sameName', true, 1]);
+        var raw = x.fs.items[KEY], afterFirst = x.fs.setCalls; var r2 = x.st.apply(function (d) { return O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' }); });
+        return [r.ok, afterFirst, r2.ok, r2.needsConfirm, x.fs.setCalls - afterFirst, x.fs.items[KEY] === raw, JSON.parse(raw).games.length];
+      }, [true, 1, false, 'sameName', 0, true, 1]);
     });
 
     suite('내 프리셋 (ops.savePreset·renamePreset·deletePreset)', function () {
@@ -2254,18 +2254,24 @@
         var e = srcData();
         return [r.ok, d.presets.length, over.ok, JSON.stringify(full) === s, O.savePreset(e, 'gm1', ' ', 'ask', SAT).ok, O.savePreset(e, 'nope', 'x', 'ask', SAT).ok, O.savePreset(e, 'gm1', 'x', 'ask', null).ok, e.presets.length];
       }, [true, 2, false, true, false, false, false, 0]);
-      eq('이름 바꾸기: 성공, 다른 프리셋과 같은 이름은 거부(저장·이름 바꾸기에서만 막고 가져온 중복은 그대로), 없는 프리셋·빈 이름 거부', function () {
+      eq('이름 바꾸기: 성공, 다른 프리셋과 같은 이름은 거부, 없는 프리셋·빈 이름 거부', function () {
         var d = save().d; O.savePreset(d, 'gm1', '둘째', 'ask', SAT); var ids = d.presets.map(function (p) { return p.id; });
         var a = O.renamePreset(d, ids[0], '새 이름'), dup = O.renamePreset(d, ids[0], '둘째'), same = O.renamePreset(d, ids[1], '둘째');
         return [a.ok, d.presets[0].name, dup.ok, same.ok, O.renamePreset(d, 'nope', 'x').ok, O.renamePreset(d, ids[0], '  ').ok];
       }, [true, '새 이름', false, true, false, false]);
+      eq('가져온 데이터에 같은 이름의 내 프리셋이 둘 있어도 그대로 가져온다(막지 않는다)', function () {
+        var d = save().d; var p2 = JSON.parse(JSON.stringify(d.presets[0])); p2.id = 'ps_dup'; d.presets.push(p2);
+        var y = ST.create(fake()); var im = y.importJson(JSON.stringify(d));
+        return [im.ok, y.get().presets.map(function (q) { return q.name; }), y.get().presets[1].id];
+      }, [true, ['내 메이플', '내 메이플'], 'ps_dup']);
       eq('삭제: 내 프리셋은 지워지고 그 프리셋으로 만든 게임은 그대로, 기본 프리셋 id(builtin-…)나 없는 id는 지울 수 없고 바뀌지 않는다', function () {
         var d = save().d; var r = O.addGameFromPreset(d, d.presets[0], { at: PAT, sameName: 'add' });
-        var gamesBefore = d.games.length, s = JSON.stringify(d);
+        var s = JSON.stringify(d);
         var b = O.deletePreset(d, 'builtin-maple'), n = O.deletePreset(d, 'nope'); var same = JSON.stringify(d) === s;
+        var content = function () { return JSON.stringify([d.games, d.groups, d.tasks, d.records, d.groupRecords]); }, before = content();
         var del = O.deletePreset(d, d.presets[0].id);
-        return [r.ok, b.ok, n.ok, same, del.ok, d.presets.length, d.games.length === gamesBefore];
-      }, [true, false, false, true, true, 0, true]);
+        return [r.ok, b.ok, n.ok, same, del.ok, d.presets.length, content() === before, d.games.length];
+      }, [true, false, false, true, true, 0, true, 2]);
       eq('내 프리셋을 불러오면 폴더 구조와 끈 항목이 새 id로 그대로 복사된다 (폴더 입력은 무시), 원본 게임·프리셋과 id가 겹치지 않는다', function () {
         var d = save().d; var r = O.addGameFromPreset(d, d.presets[0], { at: PAT, sameName: 'add', folderText: '무시' });
         var g = d.games[1], src = d.games[0];
@@ -2289,6 +2295,67 @@
         var x = storeWith(save().d); var out = x.st.exportJson().text; var y = ST.create(fake()); var im = y.importJson(out);
         return [im.ok, im.summary.presets, JSON.stringify(y.get().presets) === JSON.stringify(x.st.get().presets), JSON.stringify(y.get().presets).indexOf('doneAt')];
       }, [true, 1, true, -1]);
+    });
+
+
+    suite('프리셋 리뷰 반영 (id 맵·덮어쓰기 대상·검사 순서·low·독립성)', function () {
+      if (!PR) return;
+      var SAT = D(10, 15, 11, 0);
+      function mixed() { // 주기 id와 묶음 id가 같은 문자열 + 간격 주기 + 묶음·숙제 low가 섞여 있고, 폴더가 묶음 id와 숙제 id를 함께 끈 게임
+        return {
+          version: 1, presets: [], records: [], groupRecords: [],
+          games: [{ id: 'gm1', name: '혼합', cycles: [{ id: 'x1', name: '일일', type: 'daily', time: '05:00' }, { id: 'x2', name: '간격', type: 'interval', anchor: '2026-10-01T00:00', every: { days: 1, hours: 2, minutes: 30 } }],
+            levels: ['계정', '캐릭터'], folders: [{ id: 'fa', parentId: null, level: 1, name: '본계정', off: ['x1', 'tb'] }, { id: 'fc', parentId: 'fa', level: 2, name: '캐릭터', off: ['ta'] }] }],
+          groups: [{ id: 'x1', gameId: 'gm1', name: '높음', cycleId: 'x1', scope: 2, required: 2, low: false }, { id: 'ga', gameId: 'gm1', name: '낮은 묶음', cycleId: 'x2', scope: 'game', required: null, low: true }],
+          tasks: [{ id: 'ta', groupId: 'x1', name: '숙제A', low: true, createdAt: '2026-10-01T00:00:00' }, { id: 'tb', groupId: 'x1', name: '숙제B', low: false, createdAt: '2026-10-01T00:00:00' }, { id: 'tc', groupId: 'ga', name: '숙제C', low: false, createdAt: '2026-10-01T00:00:00' }]
+        };
+      }
+      function brief(g) { // 새 id와 상관없이 구성만 비교하는 글자 (levels·주기·간격·묶음 low·숙제 low)
+        return JSON.stringify([g.levels, g.cycles.map(function (c) { return [c.name, c.type, c.time, c.anchor, c.every]; }),
+          g.groups.map(function (x) { return [x.name, x.scope, x.required, x.low, g.cycles.filter(function (c) { return c.id === x.cycleId; }).map(function (c) { return c.name; })]; }),
+          g.tasks.map(function (k) { return [k.name, k.low, g.groups.filter(function (x) { return x.id === k.groupId; }).map(function (x) { return x.name; })]; })]);
+      }
+      eq('주기 id와 묶음 id가 같은 문자열이어도 묶음은 자기 주기를 가리킨다 (저장과 불러오기 모두)', function () {
+        var m = mut(function (d) { return O.savePreset(d, 'gm1', '혼합 프리셋', 'ask', SAT); }, mixed()); var p = m.d.presets[0];
+        var cyc = p.game.cycles.map(function (c) { return c.id; });
+        var l = mut(function (d) { return O.addGameFromPreset(d, p, { at: PAT, sameName: 'add' }); }, m.d); var g = l.d.games[1], gr = l.d.groups.filter(function (x) { return x.gameId === g.id; });
+        return [m.valid.ok, p.game.groups[0].cycleId === p.game.cycles[0].id, p.game.groups[0].cycleId === p.game.groups[0].id, p.game.groups[1].cycleId === p.game.cycles[1].id, l.valid.ok, gr[0].cycleId === g.cycles[0].id, gr[1].cycleId === g.cycles[1].id, cyc.length];
+      }, [true, true, false, true, true, true, true, 2]);
+      eq('저장·불러오기 직전 구성 스냅샷과 비교: levels·주기(간격 every 포함)·묶음 low·숙제 low·숙제 배열이 그대로다 (저장본, 불러온 게임 모두)', function () {
+        var d = mixed(); var snap = brief({ levels: d.games[0].levels, cycles: d.games[0].cycles, groups: d.groups, tasks: d.tasks });
+        var m = mut(function (x) { return O.savePreset(x, 'gm1', '혼합 프리셋', 'ask', SAT); }, d);
+        var l = mut(function (x) { return O.addGameFromPreset(x, x.presets[0], { at: PAT, sameName: 'add' }); }, m.d); var g = l.d.games[1];
+        var loaded = brief({ levels: g.levels, cycles: g.cycles, groups: l.d.groups.filter(function (x) { return x.gameId === g.id; }), tasks: l.d.tasks.filter(function (k) { return l.d.groups.some(function (x) { return x.id === k.groupId && x.gameId === g.id; }); }) });
+        return [brief(m.d.presets[0].game) === snap, loaded === snap];
+      }, [true, true]);
+      eq('끈 항목에 묶음 id와 숙제 id가 섞여 있어도 새 id로 다시 이어진다 (저장본과 불러온 게임의 폴더가 같은 이름의 묶음·숙제를 끈다)', function () {
+        var m = mut(function (x) { return O.savePreset(x, 'gm1', '혼합 프리셋', 'ask', SAT); }, mixed()); var pg = m.d.presets[0].game;
+        function names(game, groups, tasks, f) { return f.off.map(function (id) { var a = groups.filter(function (x) { return x.id === id; })[0], b = tasks.filter(function (x) { return x.id === id; })[0]; return a ? '묶음:' + a.name : (b ? '숙제:' + b.name : '?'); }); }
+        var l = mut(function (x) { return O.addGameFromPreset(x, x.presets[0], { at: PAT, sameName: 'add' }); }, m.d); var g = l.d.games[1], gr = l.d.groups.filter(function (x) { return x.gameId === g.id; }), tk = l.d.tasks.filter(function (k) { return gr.some(function (x) { return x.id === k.groupId; }); });
+        return [names(pg, pg.groups, pg.tasks, pg.folders[0]), names(pg, pg.groups, pg.tasks, pg.folders[1]), names(g, gr, tk, g.folders[0]), names(g, gr, tk, g.folders[1]), l.valid.ok];
+      }, [['묶음:높음', '숙제:숙제B'], ['숙제:숙제A'], ['묶음:높음', '숙제:숙제B'], ['숙제:숙제A'], true]);
+      eq('묶음의 low: 기본 프리셋은 모두 false이고, 내 프리셋 저장·불러오기에서 묶음별 true/false가 그대로다', function () {
+        var defaultsLow = PR.all().every(function (q) { return q.game.groups.every(function (x) { return x.low === false; }); }) && PR.DEFAULTS.every(function (q) { return q.groups.every(function (x) { return x.low === undefined; }); });
+        var inst = PR.all().map(function (q) { var m = mut(function (x) { return O.addGameFromPreset(x, q, { at: PAT, sameName: 'ask' }); }, emptyD()); return m.d.groups.every(function (x) { return x.low === false; }); });
+        var m = mut(function (x) { return O.savePreset(x, 'gm1', '혼합 프리셋', 'ask', SAT); }, mixed());
+        var l = mut(function (x) { return O.addGameFromPreset(x, x.presets[0], { at: PAT, sameName: 'add' }); }, m.d);
+        return [defaultsLow, inst, m.d.presets[0].game.groups.map(function (x) { return x.name + ':' + x.low; }), l.d.groups.filter(function (x) { return x.gameId === l.d.games[1].id; }).map(function (x) { return x.name + ':' + x.low; })];
+      }, [true, [true, true, true], ['높음:false', '낮은 묶음:true'], ['높음:false', '낮은 묶음:true']]);
+      eq('덮어쓰기는 확인 창이 가리킨 프리셋(existingId)을 덮어쓴다: 같은 이름이 둘이면 지정한 쪽만 바뀌고 다른 쪽은 그대로, 없는 id는 거부', function () {
+        var d = mixed(); O.savePreset(d, 'gm1', '같음', 'ask', SAT); var p2 = JSON.parse(JSON.stringify(d.presets[0])); p2.id = 'ps_second'; p2.savedAt = '2026-10-10T00:00:00'; d.presets.push(p2);
+        d.tasks.push({ id: 'tn', groupId: 'ga', name: '새 숙제', low: false, createdAt: '2026-10-01T00:00:00' });
+        var ask = O.savePreset(d, 'gm1', '같음', 'ask', SAT);
+        var first = JSON.stringify(d.presets[0]), s = JSON.stringify(d);
+        var bad = O.savePreset(d, 'gm1', '같음', 'overwrite', D(10, 20, 1, 0), 'nope'); var same = JSON.stringify(d) === s;
+        var r = O.savePreset(d, 'gm1', '같음', 'overwrite', D(10, 20, 1, 0), 'ps_second');
+        return [ask.needsConfirm, bad.ok, same, r.ok, r.id, d.presets.length, JSON.stringify(d.presets[0]) === first, d.presets[1].game.tasks.length, d.presets[1].savedAt, d.presets[0].game.tasks.length];
+      }, ['sameName', false, true, true, 'ps_second', 2, true, 4, '2026-10-20T01:00:00', 3]);
+      eq('검사 순서: 같은 이름의 게임이 있어도 폴더 입력이 잘못되면 먼저 그 오류가 나고(확인 요청 없음) 아무것도 바뀌지 않는다', function () {
+        var d = emptyD(); O.addGameFromPreset(d, PR.all()[1], { at: PAT, sameName: 'ask' }); var s = JSON.stringify(d);
+        var r = O.addGameFromPreset(d, PR.all()[1], { at: PAT, sameName: 'ask', folderText: 'a\n  b\n    c' });
+        var ok2 = O.addGameFromPreset(d, PR.all()[1], { at: PAT, sameName: 'ask', folderText: 'a\n  b' });
+        return [r.ok, r.needsConfirm, r.error.indexOf('들여쓰기') >= 0, JSON.stringify(d) === s, ok2.needsConfirm];
+      }, [false, undefined, true, true, 'sameName']);
     });
 
     suite('링크 주소 (UI.navLink)와 ?now= / #앵커', function () {

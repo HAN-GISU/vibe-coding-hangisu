@@ -238,6 +238,7 @@
   }
 
   // 게임을 내 프리셋으로 저장한다. 같은 이름이 있으면 "덮어쓰기 / 다른 이름으로 저장 / 취소"를 묻는다.
+  // 덮어쓰기는 첫 저장이 가리킨 프리셋(existingId)을 그대로 덮어쓰고, 확인 창에 그 저장 시각을 보여 준다.
   function saveAsPreset(g, initialName) {
     var id = UI.nextId('f');
     var input = el('input', { class: 'input', type: 'text', id: id, value: initialName || g.name, maxlength: 100, autocomplete: 'off' });
@@ -248,29 +249,34 @@
       onSubmit: function () {
         var name = input.value;
         var r = Store.apply(function (d) { return O.savePreset(d, g.id, name, 'ask', Reset.now()); });
-        if (r.needsConfirm === 'sameName') { conflict = name; return { ok: true }; }
+        if (r.needsConfirm === 'sameName') { conflict = { name: name, existingId: r.existingId }; return { ok: true }; }
         if (!r.ok) return r;
         render();
         return { ok: true };
       }
     }).then(function (done) {
       if (!done || conflict === null) return;
-      var name = conflict, other = false;
+      var name = conflict.name, existingId = conflict.existingId, other = false;
+      var old = null;
+      Store.get().presets.forEach(function (p) { if (p.id === existingId) old = p; });
+      var savedAt = old ? Reset.parseTime(old.savedAt) : null;
       afterModal(UI.modal({
-        title: '같은 이름의 프리셋이 있어요', hideSubmit: true, cancelLabel: '취소',
+        title: '같은 이름의 프리셋이 있어요', cancelLabel: '취소', submitLabel: '덮어쓰기', danger: true,
         body: function (ctx) {
           return el('div', {}, [
             el('p', { text: '"' + name + '" 프리셋이 이미 있어요. 어떻게 할까요?' }),
+            savedAt ? el('p', { class: 'muted', text: '덮어쓸 프리셋: ' + UI.formatWhen(savedAt, Reset.now(), false) + '에 저장함' }) : null,
             el('div', { class: 'sheet-actions' }, [
-              el('button', { type: 'button', class: 'btn btn-danger', text: '덮어쓰기', onclick: function () {
-                var r = Store.apply(function (d) { return O.savePreset(d, g.id, name, 'overwrite', Reset.now()); });
-                UI.notice(r.ok ? '' : r.error);
-                if (r.ok) render();
-                ctx.close(true);
-              } }),
               el('button', { type: 'button', class: 'btn', text: '다른 이름으로 저장', onclick: function () { other = true; ctx.close(true); } })
             ])
           ]);
+        },
+        onSubmit: function () {
+          // 실패하면 창을 닫지 않고 오류를 창 안에 보여 준다 (다른 저장 경로와 같다)
+          var r = Store.apply(function (d) { return O.savePreset(d, g.id, name, 'overwrite', Reset.now(), existingId); });
+          if (!r.ok) return r;
+          render();
+          return { ok: true };
         }
       }).then(function () { if (other) saveAsPreset(g, name); }));
     }));
