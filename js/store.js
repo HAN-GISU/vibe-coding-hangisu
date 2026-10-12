@@ -1384,14 +1384,14 @@
       if (!sync()) return { ok: false, error: MSG.readFail };
       if (typeof text !== 'string') return { ok: false, error: '파일 내용을 읽지 못했어요.' };
       if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-      if (text.length > LIMIT.text) return { ok: false, error: '파일이 너무 커요. 약 6MB까지 가져올 수 있어요.' };
+      if (text.length > LIMIT.text) return { ok: false, error: '파일이 너무 커요. JSON 600만 글자까지 가져올 수 있어요.' };
       var parsed;
       try { parsed = JSON.parse(text); } catch (e) { return { ok: false, error: '올바른 JSON 파일이 아니에요.' }; }
       if (isObj(parsed) && parsed.app !== undefined && parsed.app !== APP) {
         return { ok: false, error: '이 앱에서 내보낸 파일이 아니에요.' };
       }
       var p = prepare(parsed, '');
-      if (!p.ok) return { ok: false, error: p.error === MSG.tooBig ? '파일이 너무 커요. 약 6MB까지 가져올 수 있어요.' : p.error, errors: p.errors };
+      if (!p.ok) return { ok: false, error: p.error === MSG.tooBig ? '파일이 너무 커요. JSON 600만 글자까지 가져올 수 있어요.' : p.error, errors: p.errors };
       var norm = { data: p.clean, dropped: p.dropped };
       var out = p.text;
       if (state.persistent) {

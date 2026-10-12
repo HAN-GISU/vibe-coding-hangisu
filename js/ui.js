@@ -237,14 +237,14 @@
 
   /* ---------- 데이터 백업: 내보내기와 가져오기 (CLAUDE.md 3장 "저장", 4장 설정) ---------- */
 
-  var IMPORT_FIXED = '기존 데이터와 완료 기록이 모두 바뀝니다. 먼저 내보내기를 해 두세요';
+  var IMPORT_CHANGES = '기존 데이터와 완료 기록이 모두 바뀝니다.';
+  var IMPORT_EXPORT_FIRST = '먼저 내보내기를 해 두세요';
   var IMPORT_SHOWN_ERRORS = 5;
-  var TOO_BIG_MESSAGE = '파일이 너무 커요. 약 6MB까지 가져올 수 있어요.';
+  var TOO_BIG_MESSAGE = '파일이 너무 커요.';
 
   // 파일을 읽기 전에 아주 큰 파일을 거르는 바이트 상한. 가져오기 상한(Store.LIMIT.text)은 글자 수이고 한글은 UTF-8로
   // 글자당 3바이트라서, 상한 안의 정상 파일을 막지 않도록 넉넉하게(4배) 둔다. 진짜 판정은 읽은 뒤 importJson의 글자 수 검사다.
-  function importMaxBytes() { return global.Store.LIMIT.text * 4; }
-  function importTooBig(bytes) { return bytes > importMaxBytes(); }
+  function importTooBig(bytes) { return bytes > global.Store.LIMIT.text * 4; }
 
   function formatSize(bytes) {
     if (bytes < 1024) return bytes + '바이트';
@@ -253,11 +253,11 @@
   }
 
   // 가져오기 확인 창의 글. o: { fileName, size, corrupted, persistent } → { title, lines }
-  // 손상 상태에서는 내보낼 데이터가 없으므로 고정 문장 대신 "손상된 원문을 보관(백업)한 뒤 바꿔요"를 쓴다.
+  // 손상 상태에서는 내보낼 데이터가 없으므로 뒷부분만 "손상된 원문은 보관(백업)해 두고 바꿔요"로 바꾼다(앞 문장은 그대로).
   function importDialogText(o) {
     var lines = [];
-    if (o.corrupted) lines.push({ text: '저장된 데이터가 손상돼 있어요. 가져오면 이 데이터를 대신해요. 손상된 원문은 이 브라우저 안에 따로 보관(백업)해 두고 바꿔요.', strong: true });
-    else lines.push({ text: IMPORT_FIXED, strong: true });
+    if (o.corrupted) lines.push({ text: IMPORT_CHANGES + ' 손상된 원문은 이 브라우저에 따로 보관(백업)해 두고 바꿔요. 필요하면 먼저 [손상된 원문 내려받기]를 해 두세요', strong: true });
+    else lines.push({ text: IMPORT_CHANGES + ' ' + IMPORT_EXPORT_FIRST, strong: true });
     lines.push('파일: ' + o.fileName + ' (' + formatSize(o.size) + ')');
     if (!o.persistent) lines.push('이 브라우저에서는 저장되지 않아요. 가져와도 이 페이지를 닫으면 사라지니, 닫기 전에 다시 내보내 주세요.');
     return { title: '가져올까요?', lines: lines };
@@ -274,7 +274,7 @@
   }
 
   function importSummaryText(s, persistent) {
-    var text = '게임 ' + s.games + '개, 숙제 ' + s.tasks + '개, 완료 기록 ' + s.records + '개를 가져왔어요.';
+    var text = '게임 ' + s.games + '개, 숙제 ' + s.tasks + '개, 숙제 완료 기록 ' + s.records + '개, 묶음 완료 기록 ' + s.groupRecords + '개를 가져왔어요.';
     if (s.dropped > 0) text += ' 알 수 없는 항목 ' + s.dropped + '개는 건너뛰었어요.';
     if (!persistent) text += ' 이 브라우저에서는 저장되지 않아요.';
     return text;
@@ -286,7 +286,16 @@
     var out = global.Store.exportJson(global.Reset.now());
     download(out.filename, out.text, 'application/json;charset=utf-8');
     lastExported = out.filename;
+    updateLastExportNote();
     return out.filename;
+  }
+
+  // 설정 화면의 "마지막으로 내보낸 파일" 줄을 맞춘다 (카드의 버튼이든 가져오기 창의 [먼저 내보내기]든 같은 길로)
+  function updateLastExportNote() {
+    var p = document.getElementById('last-export');
+    if (!p || !lastExported) return;
+    p.textContent = '마지막으로 내보낸 파일: ' + lastExported;
+    p.hidden = false;
   }
 
   var fileInput = null;
@@ -440,8 +449,8 @@
     modal: modal, confirm: confirmDialog, info: info, sheet: sheet, isDialogOpen: isDialogOpen, whenDialogsClosed: whenDialogsClosed,
     notice: notice, download: download,
     mountChrome: mountChrome, refreshStorageBanner: refreshStorageBanner, clockText: clockText, formatWhen: formatWhen, formatPeriod: formatPeriod,
-    exportFile: exportFile, lastExportedName: function () { return lastExported; }, startImport: startImport, handleImportFile: handleImportFile,
+    exportFile: exportFile, startImport: startImport, handleImportFile: handleImportFile,
     onImported: function (fn) { importDone = fn; }, importDialogText: importDialogText, formatImportErrors: formatImportErrors, importSummaryText: importSummaryText,
-    importTooBig: importTooBig, importMaxBytes: importMaxBytes, formatSize: formatSize, IMPORT_FIXED: IMPORT_FIXED
+    importTooBig: importTooBig, formatSize: formatSize, updateLastExportNote: updateLastExportNote
   };
 })(window);

@@ -137,6 +137,7 @@
     app.appendChild(el('p', { class: 'page-desc', text: '게임, 리셋 주기, 단계, 폴더, 묶음, 숙제를 만들고 고칩니다. 바꾼 내용은 이 브라우저에 바로 저장돼요.' }));
     app.appendChild(el('div', { class: 'layout' }, [gamesCard(d, g), g ? editor(d, g) : emptyEditor()]));
     app.appendChild(backupCard());
+    UI.updateLastExportNote(); // 이미 내보낸 파일이 있으면 표시 (다시 그려도 유지)
     UI.refreshStorageBanner();
   }
 
@@ -155,21 +156,17 @@
   function backupCard() {
     var st = Store.status();
     var corrupted = st.status === 'corrupted';
-    var last = UI.lastExportedName();
     var body = [
       el('p', { text: '게임·리셋 주기·폴더·묶음·숙제와 완료 기록, 내 프리셋을 JSON 파일 하나로 내보내거나, 내보낸 파일로 되돌려요. 가져오면 지금 데이터가 모두 바뀌어요.' }),
       st.persistent ? null : el('p', { class: 'fixed-line', text: '이 브라우저에서는 저장되지 않아요. 닫기 전에 꼭 내보내 주세요.' }),
       corrupted ? el('p', { class: 'muted', text: '저장된 데이터가 손상돼 있어서 내보낼 수 없어요. 맨 위 안내에서 복구해 주세요.' }) : null,
-      last ? el('p', { class: 'muted', id: 'last-export', text: '마지막으로 내보낸 파일: ' + last }) : el('p', { class: 'muted', id: 'last-export', hidden: true })
+      el('p', { class: 'muted', id: 'last-export', hidden: true })
     ];
-    return el('div', { id: 'backup', class: 'backup-wrap' }, [card('데이터 백업', null, body, [
-      btn('JSON 내보내기', function () {
-        var name = UI.exportFile();
-        var p = document.getElementById('last-export');
-        if (p) { p.textContent = '마지막으로 내보낸 파일: ' + name; p.hidden = false; }
-      }, 'primary', corrupted),
+    var wrap = el('div', { id: 'backup', class: 'backup-wrap' }, [card('데이터 백업', null, body, [
+      btn('JSON 내보내기', function () { UI.exportFile(); }, 'primary', corrupted),
       btn('JSON 가져오기', UI.startImport)
     ])]);
+    return wrap;
   }
 
   function emptyEditor() {
