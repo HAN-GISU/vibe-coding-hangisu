@@ -235,6 +235,116 @@
     clockTimer = setTimeout(tickClock, Math.min(60000, global.Reset.msUntilNextSecond(d)));
   }
 
+  /* ---------- 데이터 백업: 내보내기와 가져오기 (CLAUDE.md 3장 "저장", 4장 설정) ---------- */
+
+  var IMPORT_FIXED = '기존 데이터와 완료 기록이 모두 바뀝니다. 먼저 내보내기를 해 두세요';
+  var IMPORT_SHOWN_ERRORS = 5;
+  var TOO_BIG_MESSAGE = '파일이 너무 커요. 약 6MB까지 가져올 수 있어요.';
+
+  // 파일을 읽기 전에 아주 큰 파일을 거르는 바이트 상한. 가져오기 상한(Store.LIMIT.text)은 글자 수이고 한글은 UTF-8로
+  // 글자당 3바이트라서, 상한 안의 정상 파일을 막지 않도록 넉넉하게(4배) 둔다. 진짜 판정은 읽은 뒤 importJson의 글자 수 검사다.
+  function importMaxBytes() { return global.Store.LIMIT.text * 4; }
+  function importTooBig(bytes) { return bytes > importMaxBytes(); }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + '바이트';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
+  }
+
+  // 가져오기 확인 창의 글. o: { fileName, size, corrupted, persistent } → { title, lines }
+  // 손상 상태에서는 내보낼 데이터가 없으므로 고정 문장 대신 "손상된 원문을 보관(백업)한 뒤 바꿔요"를 쓴다.
+  function importDialogText(o) {
+    var lines = [];
+    if (o.corrupted) lines.push({ text: '저장된 데이터가 손상돼 있어요. 가져오면 이 데이터를 대신해요. 손상된 원문은 이 브라우저 안에 따로 보관(백업)해 두고 바꿔요.', strong: true });
+    else lines.push({ text: IMPORT_FIXED, strong: true });
+    lines.push('파일: ' + o.fileName + ' (' + formatSize(o.size) + ')');
+    if (!o.persistent) lines.push('이 브라우저에서는 저장되지 않아요. 가져와도 이 페이지를 닫으면 사라지니, 닫기 전에 다시 내보내 주세요.');
+    return { title: '가져올까요?', lines: lines };
+  }
+
+  // importJson이 실패했을 때 창 안에 보여 줄 글: 앞의 5개까지, 나머지는 "외 N개". res: { error, errors? }
+  function formatImportErrors(res) {
+    var list = res.errors && res.errors.length ? res.errors : [res.error || '가져오지 못했어요.'];
+    var shown = list.slice(0, IMPORT_SHOWN_ERRORS);
+    var text = '가져오지 못했어요. 기존 데이터는 그대로예요.\n' + shown.map(function (m) { return '· ' + m; }).join('\n');
+    var rest = list.length - shown.length;
+    if (rest > 0) text += '\n외 ' + rest + '개' + (list.length >= global.Store.LIMIT.errors ? ' 이상' : '');
+    return text;
+  }
+
+  function importSummaryText(s, persistent) {
+    var text = '게임 ' + s.games + '개, 숙제 ' + s.tasks + '개, 완료 기록 ' + s.records + '개를 가져왔어요.';
+    if (s.dropped > 0) text += ' 알 수 없는 항목 ' + s.dropped + '개는 건너뛰었어요.';
+    if (!persistent) text += ' 이 브라우저에서는 저장되지 않아요.';
+    return text;
+  }
+
+  var lastExported = null;
+  // 지금 데이터를 JSON 파일로 내려받는다. 시각은 Reset.now() (?now=이면 테스트 시각). 파일 이름을 돌려준다.
+  function exportFile() {
+    var out = global.Store.exportJson(global.Reset.now());
+    download(out.filename, out.text, 'application/json;charset=utf-8');
+    lastExported = out.filename;
+    return out.filename;
+  }
+
+  var fileInput = null;
+  var importDone = null; // 저장소가 없는 모드에서 가져온 뒤 화면을 다시 그리는 함수 (설정 화면이 등록한다)
+
+  function startImport() {
+    if (!fileInput) return;
+    fileInput.value = '';
+    fileInput.click();
+  }
+
+  function readFile(file) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result)); };
+      fr.onerror = function () { reject(fr.error); };
+      fr.readAsText(file);
+    });
+  }
+
+  // 고른 파일을 읽고 확인 창을 거쳐 가져온다. 성공하면 저장소가 있는 모드는 새로 고치고, 없는 모드는 화면만 다시 그린다.
+  function handleImportFile(file) {
+    if (!file) return Promise.resolve();
+    if (importTooBig(file.size)) { return info({ title: '가져올 수 없어요', message: TOO_BIG_MESSAGE }); }
+    return readFile(file).then(function (text) {
+      var st = global.Store.status();
+      var corrupted = st.status === 'corrupted';
+      var t = importDialogText({ fileName: file.name, size: file.size, corrupted: corrupted, persistent: st.persistent });
+      var note = el('p', { class: 'muted', hidden: true });
+      var body = el('div', {}, [
+        t.lines.map(function (l) { return el('p', { class: l.strong ? 'fixed-line' : '', text: l.strong ? l.text : l }); }),
+        corrupted ? null : el('div', { class: 'banner-actions' }, [el('button', { type: 'button', class: 'btn btn-sm', text: '먼저 내보내기', onclick: function () {
+          note.textContent = '내보냈어요: ' + exportFile();
+          note.hidden = false;
+        } })]),
+        note
+      ]);
+      var summary = null;
+      return modal({
+        title: t.title, body: body, submitLabel: '가져오기', danger: true,
+        onSubmit: function () {
+          var r = global.Store.importJson(text);
+          if (!r.ok) return { ok: false, error: formatImportErrors(r) };
+          summary = r.summary;
+          return { ok: true };
+        }
+      }).then(function (done) {
+        if (!done) return;
+        var persistent = global.Store.status().persistent;
+        return info({ title: '가져왔어요', message: importSummaryText(summary, persistent) }).then(function () {
+          if (persistent) { global.location.reload(); return; }
+          refreshStorageBanner();
+          if (importDone) importDone();
+        });
+      });
+    }, function () { return info({ title: '가져올 수 없어요', message: '파일을 읽지 못했어요.' }); });
+  }
+
   var storageBox = null;
   function refreshStorageBanner() {
     if (!storageBox) return;
@@ -244,12 +354,13 @@
       storageBox.hidden = false;
       storageBox.appendChild(el('p', { class: 'fixed-line', text: '저장된 데이터가 손상돼 있어서 변경할 수 없어요.' }));
       storageBox.appendChild(el('p', { text: st.error || '' }));
-      storageBox.appendChild(el('p', { text: '손상된 원문을 내려받아 보관한 뒤 [새로 시작]을 누르세요. JSON 파일을 가져와서 복구하는 기능은 아직 없어요.' }));
+      storageBox.appendChild(el('p', { text: '이전에 내보낸 JSON 파일이 있으면 [JSON 가져오기로 복구]를 누르세요. 없으면 손상된 원문을 내려받아 보관한 뒤 [새로 시작]을 누르세요.' }));
       storageBox.appendChild(el('div', { class: 'banner-actions' }, [
         el('button', { type: 'button', class: 'btn', text: '손상된 원문 내려받기', onclick: function () {
           var d = global.Reset.now();
           download('vibe-coding-hangisu-broken-' + d.getFullYear() + two(d.getMonth() + 1) + two(d.getDate()) + '-' + two(d.getHours()) + two(d.getMinutes()) + '.txt', global.Store.rawText() || '');
         } }),
+        el('button', { type: 'button', class: 'btn btn-primary', text: 'JSON 가져오기로 복구', onclick: startImport }),
         el('button', { type: 'button', class: 'btn btn-danger', text: '새로 시작', onclick: function () {
           confirmDialog({
             title: '새로 시작할까요?',
@@ -296,6 +407,10 @@
       ['pointerdown', 'mouseenter', 'focus', 'click'].forEach(function (ev) { a.addEventListener(ev, refresh); });
       return a;
     }));
+    // 가져오기 파일 선택창 (보이지 않는 입력). [JSON 가져오기] 버튼들이 이것을 연다.
+    fileInput = el('input', { type: 'file', id: 'import-file', accept: '.json,application/json', hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
+    fileInput.addEventListener('change', function () { handleImportFile(fileInput.files && fileInput.files[0]); });
+    host.appendChild(fileInput);
     host.appendChild(el('header', { class: 'app-header' }, [el('div', { class: 'app-header-inner' }, [el('span', { class: 'app-title', text: '게임 숙제 체크' }), nav])]));
 
     storageBox = el('div', { class: 'banner', role: 'status', hidden: true });
@@ -324,6 +439,9 @@
     el: el, field: field, nextId: nextId, navLink: navLink,
     modal: modal, confirm: confirmDialog, info: info, sheet: sheet, isDialogOpen: isDialogOpen, whenDialogsClosed: whenDialogsClosed,
     notice: notice, download: download,
-    mountChrome: mountChrome, refreshStorageBanner: refreshStorageBanner, clockText: clockText, formatWhen: formatWhen, formatPeriod: formatPeriod
+    mountChrome: mountChrome, refreshStorageBanner: refreshStorageBanner, clockText: clockText, formatWhen: formatWhen, formatPeriod: formatPeriod,
+    exportFile: exportFile, lastExportedName: function () { return lastExported; }, startImport: startImport, handleImportFile: handleImportFile,
+    onImported: function (fn) { importDone = fn; }, importDialogText: importDialogText, formatImportErrors: formatImportErrors, importSummaryText: importSummaryText,
+    importTooBig: importTooBig, importMaxBytes: importMaxBytes, formatSize: formatSize, IMPORT_FIXED: IMPORT_FIXED
   };
 })(window);

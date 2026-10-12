@@ -136,6 +136,7 @@
     app.appendChild(el('h1', { class: 'page-title', text: '설정' }));
     app.appendChild(el('p', { class: 'page-desc', text: '게임, 리셋 주기, 단계, 폴더, 묶음, 숙제를 만들고 고칩니다. 바꾼 내용은 이 브라우저에 바로 저장돼요.' }));
     app.appendChild(el('div', { class: 'layout' }, [gamesCard(d, g), g ? editor(d, g) : emptyEditor()]));
+    app.appendChild(backupCard());
     UI.refreshStorageBanner();
   }
 
@@ -148,6 +149,27 @@
       }))
       : el('p', { class: 'empty', text: '아직 게임이 없어요.' });
     return card('게임', '관리할 게임을 고르세요.', list, [btn('+ 게임 추가', addGame, 'primary')]);
+  }
+
+  // 데이터 백업: 전체 데이터를 JSON 파일 하나로 내보내거나, 내보낸 파일로 바꾼다 (CLAUDE.md 3장 "저장")
+  function backupCard() {
+    var st = Store.status();
+    var corrupted = st.status === 'corrupted';
+    var last = UI.lastExportedName();
+    var body = [
+      el('p', { text: '게임·리셋 주기·폴더·묶음·숙제와 완료 기록, 내 프리셋을 JSON 파일 하나로 내보내거나, 내보낸 파일로 되돌려요. 가져오면 지금 데이터가 모두 바뀌어요.' }),
+      st.persistent ? null : el('p', { class: 'fixed-line', text: '이 브라우저에서는 저장되지 않아요. 닫기 전에 꼭 내보내 주세요.' }),
+      corrupted ? el('p', { class: 'muted', text: '저장된 데이터가 손상돼 있어서 내보낼 수 없어요. 맨 위 안내에서 복구해 주세요.' }) : null,
+      last ? el('p', { class: 'muted', id: 'last-export', text: '마지막으로 내보낸 파일: ' + last }) : el('p', { class: 'muted', id: 'last-export', hidden: true })
+    ];
+    return el('div', { id: 'backup', class: 'backup-wrap' }, [card('데이터 백업', null, body, [
+      btn('JSON 내보내기', function () {
+        var name = UI.exportFile();
+        var p = document.getElementById('last-export');
+        if (p) { p.textContent = '마지막으로 내보낸 파일: ' + name; p.hidden = false; }
+      }, 'primary', corrupted),
+      btn('JSON 가져오기', UI.startImport)
+    ])]);
   }
 
   function emptyEditor() {
@@ -615,6 +637,7 @@
   /* ---------- 시작 ---------- */
 
   UI.mountChrome({ active: 'settings' });
+  UI.onImported(render); // 저장소가 없는 모드에서는 가져온 뒤 새로 고치지 않고 다시 그린다
   render();
 
   // 탭이 다시 보이면 다시 그린다 (다른 탭에서 바뀐 내용 반영). 열려 있는 창이 있으면 닫힌 뒤에 그린다.

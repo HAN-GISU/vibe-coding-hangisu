@@ -275,7 +275,7 @@ dialog.dlg::backdrop { background: var(--overlay); }
 .dlg-body p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .dlg-body p:last-child { margin-bottom: 0; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 0 var(--card-padding) 20px; }
-.form-error { margin: 12px 0 0; color: var(--destructive); font-size: 13px; }
+.form-error { margin: 12px 0 0; color: var(--destructive); font-size: 13px; white-space: pre-line; overflow-wrap: anywhere; }
 .sheet-actions { display: grid; gap: 8px; }
 .sheet-actions .btn { width: 100%; text-align: left; }
 .fixed-line { font-weight: 600; }
@@ -416,3 +416,6 @@ table.board { width: 100%; border-collapse: collapse; }
 .st-missed { color: var(--destructive); font-weight: 600; }
 .badge-warn { border-color: var(--destructive); color: var(--destructive); }
 .hnote { margin: 4px 0 0; font-size: 13px; }
+
+/* 데이터 백업 카드 (설정 화면 맨 아래) */
+.backup-wrap { margin-top: var(--gap); }
