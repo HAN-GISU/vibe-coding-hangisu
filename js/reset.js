@@ -15,8 +15,10 @@
   var DAY = 86400000;
   var MAX_PERIODS = 1000; // listPeriods가 돌려주는 기간 수의 상한 (분 단위 주기에서 끝없이 늘어나는 것을 막는다)
 
+  var MAX_EVERY_MS = 36500 * DAY; // 간격 주기의 상한 (100년). 이보다 크면 Date 범위를 벗어날 수 있다.
+
   var LOCAL_RE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
-  var ZONED_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
+  var ZONED_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-](\d{2}):?(\d{2}))$/;
   var TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
   /* ---------- 시각 읽기·쓰기 ---------- */
@@ -27,19 +29,27 @@
     return s;
   }
 
+  // 날짜·시각 성분이 실제로 있는 값인지 (2월 30일, 25시 등을 거른다)
+  function validParts(y, mo, d, h, mi, s) {
+    if (mo < 1 || mo > 12 || h > 23 || mi > 59 || s > 59) return false;
+    return d >= 1 && d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  }
+
   // 시각 문자열(또는 Date)을 Date로 읽는다. 읽을 수 없거나 없는 날짜(2월 30일 등)면 null.
+  // 시간대 표기(Z, +09:00)가 없으면 로컬 시각으로 읽는다.
   function parseTime(v) {
     if (v instanceof Date) return isNaN(v.getTime()) ? null : new Date(v.getTime());
     if (typeof v !== 'string') return null;
     var m = LOCAL_RE.exec(v);
     if (m) {
+      if (!validParts(+m[1], +m[2], +m[3], +m[4], +m[5], m[6] ? +m[6] : 0)) return null;
       var ms = m[7] ? Number((m[7] + '00').slice(0, 3)) : 0;
-      var d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0, ms);
-      if (d.getFullYear() !== +m[1] || d.getMonth() !== +m[2] - 1 || d.getDate() !== +m[3] ||
-          d.getHours() !== +m[4] || d.getMinutes() !== +m[5]) return null;
-      return d;
+      return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0, ms);
     }
-    if (ZONED_RE.test(v)) {
+    m = ZONED_RE.exec(v);
+    if (m) {
+      if (!validParts(+m[1], +m[2], +m[3], +m[4], +m[5], m[6] ? +m[6] : 0)) return null;
+      if (m[8] !== undefined && (+m[8] > 23 || +m[9] > 59)) return null;
       var z = new Date(v);
       return isNaN(z.getTime()) ? null : z;
     }
@@ -58,11 +68,8 @@
 
   // "?now=2026-10-15T05:59" 형식의 주소 문자열에서 시작 시각을 읽는다. 없거나 잘못되면 null.
   function parseNowParam(search) {
-    var m = /[?&]now=([^&]*)/.exec(search || '');
-    if (!m) return null;
-    var raw;
-    try { raw = decodeURIComponent(m[1]); } catch (e) { return null; }
-    if (!LOCAL_RE.test(raw)) return null;
+    var raw = new URLSearchParams(search || '').get('now');
+    if (raw === null || !LOCAL_RE.test(raw)) return null;
     return parseTime(raw);
   }
 
@@ -72,31 +79,39 @@
     return function (realMs) { return new Date(startMs + (realMs - realStartMs)); };
   }
 
-  var search = (global.location && global.location.search) || '';
-  var testStart = parseNowParam(search);
-  var hasNowParam = /[?&]now=/.test(search);
-  var pageClock = testStart ? makeClock(testStart, Date.now()) : null;
-
-  // 현재 시각. ?now=가 있으면 그 시각에서 시작해 실제처럼 흐른다.
-  function now() {
-    return pageClock ? pageClock(Date.now()) : new Date();
+  // 주소 문자열(search)과 페이지가 열린 실제 시각(realStartMs)으로 현재 시각의 원천을 만든다.
+  // at(realMs): 실제 시각 realMs의 현재 시각. ?now=가 있으면 그 시각에서 시작해 실제처럼 흐른다.
+  // query(realMs): 화면 이동 링크에 붙일 "?now=…"(테스트 시각일 때) 또는 "".
+  function makeNowSource(search, realStartMs) {
+    var start = parseNowParam(search);
+    var clock = start ? makeClock(start, realStartMs) : null;
+    var hasParam = new URLSearchParams(search || '').has('now');
+    function at(realMs) { return clock ? clock(realMs) : new Date(realMs); }
+    return {
+      isTest: !!start,
+      startedAt: start,
+      error: hasParam && !start ? '?now= 값을 읽지 못해 현재 시각을 씁니다. 예: ?now=2026-10-15T05:59' : null,
+      at: at,
+      query: function (realMs) { return start ? '?now=' + formatIso(at(realMs)) : ''; }
+    };
   }
+
+  var source = makeNowSource((global.location && global.location.search) || '', Date.now());
+
+  // 현재 시각. 현재 시각은 반드시 이 함수로만 얻는다.
+  function now() { return source.at(Date.now()); }
 
   function nowInfo() {
     return {
       date: now(),
-      isTest: !!testStart,
-      startedAt: testStart ? new Date(testStart.getTime()) : null,
-      error: hasNowParam && !testStart
-        ? '?now= 값을 읽지 못해 현재 시각을 씁니다. 예: ?now=2026-10-15T05:59'
-        : null
+      isTest: source.isTest,
+      startedAt: source.startedAt ? new Date(source.startedAt.getTime()) : null,
+      error: source.error
     };
   }
 
   // 화면을 옮길 때 주소에 붙일 문자열. 테스트 시각이면 그 순간의 가상 시각("?now=…"), 아니면 "".
-  function nowQuery() {
-    return testStart ? '?now=' + formatIso(now()) : '';
-  }
+  function nowQuery() { return source.query(Date.now()); }
 
   /* ---------- 리셋 주기 ---------- */
 
@@ -131,12 +146,20 @@
         var v = e[keys[i]];
         if (v !== undefined && !(isInt(v) && v >= 0)) return bad('간격의 일·시간·분은 0 이상의 정수여야 해요.');
       }
-      if (everyMs(e) <= 0) return bad('간격은 1분 이상이어야 해요.');
+      var total = everyMs(e);
+      if (!(total >= MINUTE)) return bad('간격은 1분 이상이어야 해요.');
+      if (!(total <= MAX_EVERY_MS)) return bad('간격은 100년 이하여야 해요.');
     }
     if (c.carry !== undefined) {
+      var carryBad = '주기 변경 기록(carry)이 올바르지 않아요.';
       var s = c.carry && parseTime(c.carry.since);
-      var u = c.carry && parseTime(c.carry.until);
-      if (!s || !u || s.getTime() >= u.getTime()) return bad('주기 변경 기록(carry)이 올바르지 않아요.');
+      if (!s) return bad(carryBad);
+      if (c.type === 'once') {
+        if (c.carry.until !== undefined) return bad(carryBad); // 1회는 끝나지 않으므로 until이 없다
+      } else {
+        var u = parseTime(c.carry.until);
+        if (!u || s.getTime() >= u.getTime()) return bad(carryBad);
+      }
     }
     return { ok: true };
   }
@@ -195,12 +218,14 @@
   }
 
   // 주기를 바꾼 직후라면 carry의 since를 기간 시작으로 쓴다. 아니면 null.
+  // 1회 주기의 carry는 until이 없고, since 이후 계속 적용된다.
   function activeCarry(c, at) {
     if (!c.carry) return null;
     var s = parseTime(c.carry.since);
+    if (!s || at < s) return null;
+    if (c.type === 'once') return s;
     var u = parseTime(c.carry.until);
-    if (!s || !u) return null;
-    return at >= s && at < u ? s : null;
+    return u && at < u ? s : null;
   }
 
   // at 이하의 가장 최근 리셋 시각. 1회는 null.
@@ -218,31 +243,42 @@
     return { start: lastReset(c, at), end: nextReset(c, at) };
   }
 
-  // 숙제를 만든 시각(since)이 속한 기간부터 지금 기간까지, 최신순 [{start, end, isCurrent}].
-  // 주기 자체의 경계로만 나눈다(carry는 쓰지 않는다). 최대 MAX_PERIODS개.
+  // 숙제를 만든 시각(since)이 속한 기간부터 지금 기간까지, 최신순.
+  // 돌려주는 값: { periods: [{start, end, isCurrent}], truncated }
+  //   since가 at보다 뒤이면(?now=로 과거를 볼 때) periods는 빈 배열이다.
+  //   주기 자체의 경계로만 나눈다(carry는 쓰지 않는다). 최대 MAX_PERIODS개이고, 더 오래된 기간이 있어서
+  //   잘렸으면 truncated가 true다 (화면에서 "이전 기간 생략"을 알릴 때 쓴다).
   function listPeriods(c, since, at) {
-    if (c.type === 'once') return [{ start: null, end: null, isCurrent: true }];
     var from = parseTime(since);
+    if (from && from.getTime() > at.getTime()) return { periods: [], truncated: false };
+    if (c.type === 'once') return { periods: [{ start: null, end: null, isCurrent: true }], truncated: false };
     var list = [];
+    var truncated = false;
     var start = plainLast(c, at);
     var end = plainNext(c, at);
     list.push({ start: start, end: end, isCurrent: true });
-    while (from && list.length < MAX_PERIODS) {
-      if (start.getTime() <= from.getTime()) break;
+    while (from && start.getTime() > from.getTime()) {
+      if (list.length >= MAX_PERIODS) { truncated = true; break; }
       end = start;
       start = plainLast(c, new Date(start.getTime() - 1));
       list.push({ start: start, end: end, isCurrent: false });
     }
-    return list;
+    return { periods: list, truncated: truncated };
   }
 
   // 주기를 바꿀 때 새 주기에 carry를 붙여 돌려준다 (3장 "리셋 주기").
-  // at은 바꾼 시각. 이전 주기에서 한 체크가 새 주기의 다음 리셋까지 그대로 유지된다.
+  // at은 바꾼 시각. 이미 한 체크가 사라지거나 되살아나지 않게 한다.
+  //   새 주기가 반복이면 { since, until }: 바꾸기 직전의 최근 리셋부터 새 주기의 다음 리셋까지 since를 기간 시작으로 본다.
+  //   새 주기가 1회이면 { since }: 바꾸기 직전 기간의 시작 이후 기록만 완료로 인정한다 (until이 없다).
   function changeCycle(oldCycle, newCycle, at) {
     var next = {};
     Object.keys(newCycle).forEach(function (k) { if (k !== 'carry') next[k] = newCycle[k]; });
-    if (next.type === 'once') return next;
-    var since = lastReset(oldCycle, at) || new Date(0);
+    var oldLast = lastReset(oldCycle, at);
+    if (next.type === 'once') {
+      if (oldLast) next.carry = { since: formatIso(oldLast) };
+      return next;
+    }
+    var since = oldLast || new Date(0);
     var until = plainNext(next, at);
     next.carry = { since: formatIso(since), until: formatIso(until) };
     return next;
@@ -254,8 +290,10 @@
   function isOff(folders, folderId, itemId) {
     var byId = {};
     folders.forEach(function (f) { byId[f.id] = f; });
+    var seen = Object.create(null); // 이미 지나간 폴더. 부모가 서로를 가리키는 순환에서 멈춘다.
     var id = folderId;
-    for (var depth = 0; id != null && byId[id] && depth < 100; depth++) {
+    while (id != null && byId[id] && !seen[id]) {
+      seen[id] = true;
       var f = byId[id];
       if (f.off && f.off.indexOf(itemId) >= 0) return true;
       id = f.parentId;
@@ -341,16 +379,21 @@
       return { taskId: t.id, state: doneAt ? 'done' : 'todo', doneAt: doneAt };
     });
 
+    var byGroupRecord = latestIn(groupRecords, function (r) {
+      return r.groupId === group.id && sameFolder(r.folderId, folderId);
+    }, period) !== null;
+
     if (total === 0) {
+      // 묶음 완료 기록은 숙제 수와 상관없이 완료다 (숙제를 전부 끈 뒤에도 이번 기간 기록이 남아 있을 수 있다).
+      if (byGroupRecord) {
+        return { off: false, empty: false, done: true, byGroupRecord: true, doneCount: 0, need: 0, total: 0, tasks: states };
+      }
       empty.tasks = states;
       return empty;
     }
 
     var required = group.required;
     var need = isInt(required) && required >= 1 ? Math.min(required, total) : total;
-    var byGroupRecord = latestIn(groupRecords, function (r) {
-      return r.groupId === group.id && sameFolder(r.folderId, folderId);
-    }, period) !== null;
     var done = byGroupRecord || doneCount >= need;
 
     states.forEach(function (s) { if (s.state === 'todo' && done) s.state = 'skipped'; });
@@ -365,6 +408,7 @@
   //         | 'off'(그 폴더가 끈 숙제) | 'none'(그 기간에는 아직 없던 숙제)
   function periodStatus(args) {
     var ev = evaluateGroup(args);
+    if (ev.off) return { status: 'off', doneAt: null };
     var s = null;
     ev.tasks.forEach(function (x) { if (x.taskId === args.task.id) s = x; });
     if (!s) return { status: 'none', doneAt: null };
@@ -458,9 +502,9 @@
   }
 
   // 화면에 보이는 남은 시간 목록(ms, 1회는 null)에서, 다음에 다시 그릴 때까지 기다릴 시간(ms).
-  // 가장 빨리 바뀌는 글자에 맞추되, 길어도 maxMs(기본 60초)다.
-  function redrawDelay(list, maxMs) {
-    var delay = maxMs > 0 ? maxMs : MINUTE;
+  // 가장 빨리 바뀌는 글자에 맞추되, 길어도 60초다 (3장 "화면 갱신").
+  function redrawDelay(list) {
+    var delay = MINUTE;
     list.forEach(function (ms) {
       var d = msUntilTextChange(ms);
       if (d < delay) delay = d;
@@ -473,6 +517,7 @@
     formatIso: formatIso,
     parseNowParam: parseNowParam,
     makeClock: makeClock,
+    makeNowSource: makeNowSource,
     now: now,
     nowInfo: nowInfo,
     nowQuery: nowQuery,
