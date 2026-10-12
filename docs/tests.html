@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>reset.js · store.js 테스트</title>
-  <link rel="stylesheet" href="../css/style.css?v=20261012-17">
+  <link rel="stylesheet" href="../css/style.css?v=20261012-18">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
     .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
@@ -50,10 +50,10 @@
   <div id="out"></div>
 </main>
 
-<script src="../js/reset.js?v=20261012-17"></script>
-<script src="../js/store.js?v=20261012-17"></script>
-<script src="../js/ui.js?v=20261012-17"></script>
-<script src="../js/presets.js?v=20261012-17"></script>
+<script src="../js/reset.js?v=20261012-18"></script>
+<script src="../js/store.js?v=20261012-18"></script>
+<script src="../js/ui.js?v=20261012-18"></script>
+<script src="../js/presets.js?v=20261012-18"></script>
 <script>
 (function () {
   'use strict';
@@ -475,7 +475,13 @@
     has('숙제를 전부 끈 폴더도 이번 기간의 묶음 완료 기록이 있으면 완료', function () { var f = clone(F); f[0].off = ['tA', 'tB', 'tC']; return ev({ folders: f, folderId: 'c1', group: { id: 'g', scope: 2, required: null }, groupRecords: [grec('g', 'c1', today)] }); }, { done: true, byGroupRecord: true, total: 0 });
     has('같은 경우 지난 기간의 묶음 완료 기록이면 empty', function () { var f = clone(F); f[0].off = ['tA', 'tB', 'tC']; return ev({ folders: f, folderId: 'c1', group: { id: 'g', scope: 2, required: null }, groupRecords: [grec('g', 'c1', D(10, 14, 21, 0))] }); }, { done: false, empty: true });
     has('숙제가 전부 꺼진 묶음도 empty', function () { var f = clone(F); f[0].off = ['tA', 'tB', 'tC']; return ev({ folders: f, folderId: 'c1' }); }, { empty: true, done: false });
-    eq('필요 개수가 0이나 음수면 전부(3개) 해야 완료로 본다', function () { return [0, -1].map(function (v) { var r = ev({ group: { id: 'g', scope: 'game', required: v } }); return [r.need, r.done]; }); }, [[3, false], [3, false]]);
+    eq('필요 개수가 0이나 음수면 전부(3개) 해야 완료로 본다: 완료 기록 2개면 미완료, 3개면 완료', function () {
+      var two = [rec('tA', null, today), rec('tB', null, today)], three = two.concat([rec('tC', null, today)]);
+      return [0, -1].map(function (v) {
+        var g = { id: 'g', scope: 'game', required: v };
+        return [ev({ group: g }).need, ev({ group: g, records: two }).done, ev({ group: g, records: three }).done];
+      });
+    }, [[3, false, true], [3, false, true]]);
     eq('다른 묶음의 숙제는 섞이지 않는다', function () { return ev({ tasks: tasks3.concat([task('x', 'other')]) }).total; }, 3);
   });
 
@@ -1818,10 +1824,11 @@
       }, [['tk3', 'tk6'], ['tk3', 'tk4', 'tk6']]);
       eq('끈 묶음은 그 폴더 구획에서 빠진다 (본계정이 일일 퀘스트를 끔)', function () { var d = board(); d.games[0].folders[0].off = ['gr1']; return hsec(bh(d), 'fc1').groups.map(function (g) { return g.group.id; }); }, ['gr2']);
       eq('숙제를 전부 끈 묶음만 그 폴더 구획에서 빠지고(일일 퀘스트 tk1·tk2를 끔), 모든 묶음의 숙제를 끄면 그 폴더 구획 자체가 없다 (다른 폴더는 그대로)', function () {
+        var base0 = JSON.stringify(hsec(bh(board()), 'fc2'));
         var a = board(); a.games[0].folders[1].off = ['tk1', 'tk2']; var ha = bh(a);
         var d = board(); d.games[0].folders[1].off = ['tk1', 'tk2', 'tk3', 'tk6']; var h = bh(d);
-        return [hsec(ha, 'fc1').groups.map(function (g) { return g.group.id; }), hsec(h, 'fc1') === undefined, hsec(h, 'fc2') !== undefined];
-      }, [['gr2'], true, true]);
+        return [hsec(ha, 'fc1').groups.map(function (g) { return g.group.id; }), hsec(h, 'fc1') === undefined, JSON.stringify(hsec(ha, 'fc2')) === base0, JSON.stringify(hsec(h, 'fc2')) === base0];
+      }, [['gr2'], true, true, true]);
       eq('기본 10개: 숙제를 만든 기간(9/30 05:00~)부터 지금까지 16기간 중 10개만, 더 있음, 잘림 아님', function () {
         var t = hte(base, 'fc1', 'gr1', 'tk1'); return [t.shown, t.total, t.more, t.truncated, t.rows[0].period.isCurrent, t.rows[1].period.isCurrent];
       }, [10, 16, true, false, true, false]);
@@ -2332,9 +2339,9 @@
       }, [true, true]);
       eq('끈 항목에 묶음 id와 숙제 id가 섞여 있어도 새 id로 다시 이어진다 (저장본과 불러온 게임의 폴더가 같은 이름의 묶음·숙제를 끈다)', function () {
         var m = mut(function (x) { return O.savePreset(x, 'gm1', '혼합 프리셋', 'ask', SAT); }, mixed()); var pg = m.d.presets[0].game;
-        function names(game, groups, tasks, f) { return f.off.map(function (id) { var a = groups.filter(function (x) { return x.id === id; })[0], b = tasks.filter(function (x) { return x.id === id; })[0]; return a ? '묶음:' + a.name : (b ? '숙제:' + b.name : '?'); }); }
+        function names(groups, tasks, f) { return f.off.map(function (id) { var a = groups.filter(function (x) { return x.id === id; })[0], b = tasks.filter(function (x) { return x.id === id; })[0]; return a ? '묶음:' + a.name : (b ? '숙제:' + b.name : '?'); }); }
         var l = mut(function (x) { return O.addGameFromPreset(x, x.presets[0], { at: PAT, sameName: 'add' }); }, m.d); var g = l.d.games[1], gr = l.d.groups.filter(function (x) { return x.gameId === g.id; }), tk = l.d.tasks.filter(function (k) { return gr.some(function (x) { return x.id === k.groupId; }); });
-        return [names(pg, pg.groups, pg.tasks, pg.folders[0]), names(pg, pg.groups, pg.tasks, pg.folders[1]), names(g, gr, tk, g.folders[0]), names(g, gr, tk, g.folders[1]), l.valid.ok];
+        return [names(pg.groups, pg.tasks, pg.folders[0]), names(pg.groups, pg.tasks, pg.folders[1]), names(gr, tk, g.folders[0]), names(gr, tk, g.folders[1]), l.valid.ok];
       }, [['묶음:높음', '숙제:숙제B'], ['숙제:숙제A'], ['묶음:높음', '숙제:숙제B'], ['숙제:숙제A'], true]);
       eq('묶음의 low: 기본 프리셋은 모두 false이고, 내 프리셋 저장·불러오기에서 묶음별 true/false가 그대로다', function () {
         var defaultsLow = PR.all().every(function (q) { return q.game.groups.every(function (x) { return x.low === false; }); }) && PR.DEFAULTS.every(function (q) { return q.groups.every(function (x) { return x.low === undefined; }); });
@@ -2352,6 +2359,13 @@
         var r = O.savePreset(d, 'gm1', '같음', 'overwrite', D(10, 20, 1, 0), 'ps_second');
         return [ask.needsConfirm, bad.ok, same, r.ok, r.id, d.presets.length, JSON.stringify(d.presets[0]) === first, d.presets[1].game.tasks.length, d.presets[1].savedAt, d.presets[0].game.tasks.length];
       }, ['sameName', false, true, true, 'ps_second', 2, true, 4, '2026-10-20T01:00:00', 3]);
+      eq('확인 요청이 돌려준 existingId를 그대로 덮어쓰기에 넘기면 그 프리셋이 덮어써진다 (첫 번째 같은 이름, 다른 쪽은 그대로)', function () {
+        var d = mixed(); O.savePreset(d, 'gm1', '같음', 'ask', SAT); var p2 = JSON.parse(JSON.stringify(d.presets[0])); p2.id = 'ps_second'; d.presets.push(p2);
+        d.tasks.push({ id: 'tn', groupId: 'ga', name: '새 숙제', low: false, createdAt: '2026-10-01T00:00:00' });
+        var ask = O.savePreset(d, 'gm1', '같음', 'ask', SAT); var second = JSON.stringify(d.presets[1]);
+        var r = O.savePreset(d, 'gm1', '같음', 'overwrite', D(10, 21, 1, 0), ask.existingId);
+        return [ask.existingId === d.presets[0].id, r.ok, r.id === ask.existingId, d.presets[0].game.tasks.length, JSON.stringify(d.presets[1]) === second, d.presets.length];
+      }, [true, true, true, 4, true, 2]);
       eq('검사 순서: 같은 이름의 게임이 있어도 폴더 입력이 잘못되면 먼저 그 오류가 나고(확인 요청 없음) 아무것도 바뀌지 않는다', function () {
         var d = emptyD(); O.addGameFromPreset(d, PR.all()[1], { at: PAT, sameName: 'ask' }); var s = JSON.stringify(d);
         var r = O.addGameFromPreset(d, PR.all()[1], { at: PAT, sameName: 'ask', folderText: 'a\n  b\n    c' });

@@ -294,7 +294,7 @@
 
   /* ---------- 사이드바: 급한 순서 (보기만 한다) ---------- */
 
-  var side = { card: null, list: null, toggle: null, sig: null, open: false, buckets: 0, firstCount: 0, total: 0 };
+  var side = { card: null, list: null, toggle: null, sig: null, open: false, buckets: 0, firstCount: 0 };
   var SIDE_LINES = 3; // 좁은 화면에서 접힌 상태일 때 가장 급한 덩어리에서 보이는 줄 수
 
   function buildSide() {
@@ -343,8 +343,8 @@
     });
     side.buckets = buckets.length;
     side.firstCount = buckets.length ? buckets[0].items.length : 0;
-    side.total = buckets.reduce(function (n, b) { return n + b.items.length; }, 0);
-    var hidden = side.total - Math.min(SIDE_LINES, side.firstCount);
+    var total = buckets.reduce(function (n, b) { return n + b.items.length; }, 0);
+    var hidden = total - Math.min(SIDE_LINES, side.firstCount);
     if (hidden > 0) side.list.appendChild(el('p', { class: 'urgent-more', text: '외 ' + hidden + '줄' }));
     applySideOpen();
   }
