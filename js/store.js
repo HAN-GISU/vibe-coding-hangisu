@@ -19,6 +19,7 @@
   var LIMIT = {
     text: 6000000,   // 가져올 수 있는 JSON 글자 수
     name: 100,       // 이름 길이
+    memo: 300,       // 숙제 메모 길이
     games: 100,
     cycles: 50,      // 게임 하나당
     levels: 10,      // 게임 하나당
@@ -149,7 +150,14 @@
     if (!isName(t.name)) errs.add(label + ': 이름이 필요해요.');
     if (!(t.low === undefined || typeof t.low === 'boolean')) errs.add(label + ': 중요도 낮음은 true 또는 false여야 해요.');
     if (needCreatedAt && !global.Reset.parseTime(t.createdAt)) errs.add(label + ': 만든 시각을 읽을 수 없어요.');
+    if (t.memo !== undefined) {
+      if (typeof t.memo !== 'string') errs.add(label + ': 메모는 글이어야 해요.');
+      else if (t.memo.length > LIMIT.memo) errs.add(label + ': 메모는 ' + LIMIT.memo + '자까지예요.');
+    }
   }
+
+  // 메모 글을 저장할 모양으로: 줄바꿈은 LF 하나로, 앞뒤 공백은 자른다. 비면 ''.
+  function cleanMemo(text) { return typeof text === 'string' ? text.replace(/\r\n?/g, '\n').trim() : ''; }
 
   // 폴더의 off가 가리키는 id가 실제 묶음·숙제인지 (validOff: id → true)
   function checkOff(folders, validOff, label, errs) {
@@ -346,9 +354,11 @@
   }
 
   function normTask(t, withCreatedAt, ctx) {
-    countUnknownFields(t, ['id', 'groupId', 'name', 'low'].concat(withCreatedAt ? ['createdAt'] : []), ctx);
+    countUnknownFields(t, ['id', 'groupId', 'name', 'low', 'memo'].concat(withCreatedAt ? ['createdAt'] : []), ctx);
     var out = { id: t.id, groupId: t.groupId, name: t.name, low: t.low === true };
     if (withCreatedAt) out.createdAt = t.createdAt;
+    var memo = cleanMemo(t.memo);
+    if (memo) out.memo = memo; // 비어 있으면 필드를 두지 않는다
     return out;
   }
 
@@ -968,6 +978,16 @@
       t.low = low === true;
       return { ok: true };
     }
+    // 숙제의 메모(고정 메모, 숙제마다 하나)를 바꾼다. 비면 지운다. 같은 값이면 noop.
+    function setMemo(d, taskId, text) {
+      var t = findTask(d, taskId); if (!t) return fail('숙제를 찾을 수 없어요.');
+      if (typeof text !== 'string') return fail('메모는 글이어야 해요.');
+      var m = cleanMemo(text);
+      if (m.length > LIMIT.memo) return fail('메모는 ' + LIMIT.memo + '자까지예요.');
+      if (m === (typeof t.memo === 'string' ? t.memo : '')) return { ok: true, noop: true };
+      if (m) t.memo = m; else delete t.memo;
+      return { ok: true };
+    }
     function impactTask(d, taskId) {
       var c = recordCount(d, toSet([taskId]), null, null);
       return { records: c.records };
@@ -1156,7 +1176,9 @@
         return { id: fresh('gr', g.id, idMap), name: g.name, cycleId: cycleMap[g.cycleId], scope: g.scope, required: g.required === undefined ? null : g.required, low: g.low === true };
       });
       var outTasks = tasks.map(function (x) {
-        return { id: fresh('tk', x.id, idMap), groupId: idMap[x.groupId], name: x.name, low: x.low === true };
+        var o = { id: fresh('tk', x.id, idMap), groupId: idMap[x.groupId], name: x.name, low: x.low === true };
+        if (typeof x.memo === 'string' && x.memo !== '') o.memo = x.memo; // 메모도 숙제 구성의 일부
+        return o;
       });
       var folderMap = Object.create(null);
       var outFolders = folders.map(function (f) { var id = makeId('fo', used); folderMap[f.id] = id; return { id: id, f: f }; }).map(function (x) {
@@ -1205,7 +1227,11 @@
       var created = global.Reset.formatIso(o.at);
       d.games.push({ id: gid, name: n.value, cycles: c.cycles, levels: pg.levels.slice(), folders: c.folders });
       c.groups.forEach(function (g) { d.groups.push({ id: g.id, gameId: gid, name: g.name, cycleId: g.cycleId, scope: g.scope, required: g.required, low: g.low }); });
-      c.tasks.forEach(function (x) { d.tasks.push({ id: x.id, groupId: x.groupId, name: x.name, low: x.low, createdAt: created }); });
+      c.tasks.forEach(function (x) {
+        var t = { id: x.id, groupId: x.groupId, name: x.name, low: x.low, createdAt: created };
+        if (x.memo !== undefined) t.memo = x.memo;
+        d.tasks.push(t);
+      });
       return { ok: true, id: gid, summary: { cycles: c.cycles.length, groups: c.groups.length, tasks: c.tasks.length, folders: c.folders.length } };
     }
 
@@ -1263,7 +1289,7 @@
       eligibleParents: eligibleParents, moveFolderTo: moveFolderTo, impactFolder: impactFolder, deleteFolder: deleteFolder,
       moveFolder: moveFolder, folderList: folderList, offList: offList, setOff: setOff,
       addGroup: addGroup, updateGroup: updateGroup, groupHasRecords: groupHasRecords, impactGroup: impactGroup, deleteGroup: deleteGroup, moveGroup: moveGroup,
-      addTasks: addTasks, renameTask: renameTask, setTaskLow: setTaskLow, impactTask: impactTask, deleteTask: deleteTask, moveTask: moveTask
+      addTasks: addTasks, renameTask: renameTask, setTaskLow: setTaskLow, setMemo: setMemo, impactTask: impactTask, deleteTask: deleteTask, moveTask: moveTask
     };
   })();
 
