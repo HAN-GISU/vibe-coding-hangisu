@@ -342,6 +342,7 @@
   // args: { group, cycle, tasks, folders, folderId, records, groupRecords, at, period? }
   // period를 주면 그 기간으로 계산한다(지난 기간 기록용). 안 주면 at의 지금 기간이다.
   // 돌려주는 값: { off, empty, done, byGroupRecord, doneCount, need, total, tasks: [{taskId, state, doneAt}] }
+  //   off이면 empty도 항상 true다 (그 폴더가 묶음을 끈 것). 그래서 "끄거나 비어 있음"은 empty 하나로 판단한다.
   //   state: 'done' | 'todo' | 'skipped'(묶음이 완료돼 할 필요 없음) | 'off'(이 폴더가 끔)
   function evaluateGroup(args) {
     var group = args.group;
@@ -448,7 +449,7 @@
   // 기록 화면의 내용 전체를 만든다. 판정은 evaluateGroup/statusOfTask를 쓰고, 여기서는 기간과 묶기만 한다.
   // args: { games, groups, tasks, records, groupRecords, at, limit?(숙제마다 보여 줄 기간 수, 기본 10), limits?({ "숙제id/폴더id": 개수 }) }
   // 돌려주는 값: { games: [{ game, noFolderGroups, sections }], remainingMs }
-  //   sections: [{ key, common, pathText, groups: [{ group, cycle, tasks: [{ key, task, rows, total, shown, more, truncated, missed }] }] }]
+  //   sections: [{ key, pathText, groups: [{ group, cycle, tasks: [{ key, task, rows, total, shown, more, truncated, missed }] }] }]
   //     게임 공통 구획이 먼저, 이어서 폴더 트리 순서(위 단계부터). 폴더가 끈 묶음·숙제는 넣지 않는다 (현재 설정 기준).
   //   rows: 최신순 [{ period: {start, end, isCurrent}, status, doneAt }]
   //     status: 'done' | 'missed' | 'missed-group-met' | 'group-checked' | 'pending'(이번 기간, 아직 안 함) | 'pending-group-met'(이번 기간, 묶음 달성)
@@ -556,7 +557,7 @@
         var st = stateOf(g);
         common.push({ group: g, cycle: st.cycle, tasks: taskEntries(st, null) });
       });
-      if (common.length) sections.push({ key: 'game', common: true, pathText: '공통', groups: common });
+      if (common.length) sections.push({ key: 'game', pathText: '공통', groups: common });
 
       var levelsWithFolders = Object.create(null);
       ordered.forEach(function (o) {
@@ -571,7 +572,7 @@
           if (!tasks.length) return; // 숙제가 없거나 전부 끈 폴더
           gs.push({ group: g, cycle: st.cycle, tasks: tasks });
         });
-        if (gs.length) sections.push({ key: f.id, common: false, pathText: o.path.join(' › '), groups: gs });
+        if (gs.length) sections.push({ key: f.id, pathText: o.path.join(' › '), groups: gs });
       });
 
       var noFolderGroups = args.groups.filter(function (g) {
@@ -593,6 +594,7 @@
   //   checkbox: { state: 'hidden' | 'none' | 'some' | 'all', targets, done, pending }
   //     행(범위 단계 폴더)이면 그 폴더 하나, 위 단계 폴더이면 그 아래 행 중 이 묶음을 끄지 않은 폴더들을 센다.
   //   columns: [{ task, pending }]  pending = 열 머리를 누르면 완료 처리될 폴더 수
+  //   주의: ev.tasks에는 그 기간에 이미 있던 숙제만 들어 있어서 gg.tasks보다 짧을 수 있다(과거 ?now=). 숙제와 상태는 반드시 taskId로 이어 쓴다.
   function evaluateGame(args) {
     var game = args.game;
     var at = args.at;
@@ -628,7 +630,6 @@
       // 단계 범위: 범위 단계까지의 폴더를 트리 순서로
       var kids = Object.create(null);
       game.folders.forEach(function (f) {
-        if (f.level > group.scope) return;
         var key = f.parentId == null ? '' : f.parentId;
         (kids[key] = kids[key] || []).push(f);
       });
@@ -649,16 +650,18 @@
       var agg = Object.create(null);
       nodes.forEach(function (n) { if (!n.isRow) agg[n.folder.id] = { targets: 0, done: 0, partial: false }; });
       var columns = tasks.map(function (t) { return { task: t, pending: 0 }; });
+      var colById = Object.create(null);
+      columns.forEach(function (c) { colById[c.task.id] = c; });
       var anyPending = false, anyActive = false;
       nodes.forEach(function (n) {
         if (!n.isRow) return;
         var e = n.ev;
-        var state = e.off || e.empty ? 'hidden' : (e.done ? 'all' : (e.doneCount > 0 ? 'some' : 'none'));
+        var state = e.empty ? 'hidden' : (e.done ? 'all' : (e.doneCount > 0 ? 'some' : 'none'));
         n.checkbox = { state: state, targets: state === 'hidden' ? 0 : 1, done: state === 'all' ? 1 : 0, pending: state === 'hidden' || state === 'all' ? 0 : 1 };
         if (state === 'hidden') return;
         anyActive = true;
         if (state !== 'all') anyPending = true;
-        e.tasks.forEach(function (s, i) { if (s.state === 'todo') columns[i].pending += 1; });
+        e.tasks.forEach(function (s) { if (s.state === 'todo' && colById[s.taskId]) colById[s.taskId].pending += 1; });
         var up = n.parentId, seen = Object.create(null);
         while (up != null && agg[up] && !seen[up]) {
           seen[up] = true;
@@ -761,13 +764,12 @@
 
   // evaluateGame 결과 목록(게임 순서대로)에서 "급한 순서" 사이드바 내용을 만든다. 판정은 다시 하지 않는다.
   // 넣는 것: 안 한 숙제(state 'todo'). 빼는 것: 완료·할 필요 없는 숙제, 중요도 낮음(묶음 또는 숙제), 끈 폴더·끈 숙제.
-  // 돌려주는 값: [{ key, label, sortMs, items: [{ key, gameName, common, pathText, groupName, progress, taskNames }] }]
+  // 돌려주는 값: [{ key, label, sortMs, items: [{ key, gameName, pathText, groupName, progress, taskNames }] }]
   //   덩어리는 sortMs 오름차순("기한 없음"은 맨 아래). 덩어리 안은 게임 → 폴더 경로(게임 공통이 먼저) → 묶음 순.
   //   progress는 필요 개수가 있는 묶음만 "3개 중 1개", 아니면 null.
   function buildUrgent(evals) {
     var buckets = Object.create(null);
-    var order = [];
-    (evals || []).forEach(function (gm, gi) {
+    evals.forEach(function (gm, gi) {
       var folderOrder = Object.create(null);
       var kids = Object.create(null);
       gm.game.folders.forEach(function (f) {
@@ -781,25 +783,26 @@
         var g = gg.group;
         if (g.low) return;
         var rem = gg.remaining;
+        var taskById = Object.create(null);
+        gg.tasks.forEach(function (t) { taskById[t.id] = t; });
         function add(folderId, ev, path) {
-          if (ev.off || ev.empty || ev.done) return;
+          if (ev.empty || ev.done) return;
           var names = [];
-          ev.tasks.forEach(function (s, i) {
+          ev.tasks.forEach(function (s) {
             if (s.state !== 'todo') return;
-            var t = gg.tasks[i];
+            var t = taskById[s.taskId];
             if (t && !t.low) names.push(t.name);
           });
           if (!names.length) return;
           var b = rem.bucket;
-          if (!buckets[b.key]) { buckets[b.key] = { key: b.key, label: b.label, sortMs: b.sortMs, items: [] }; order.push(b.key); }
+          if (!buckets[b.key]) buckets[b.key] = { key: b.key, label: b.label, sortMs: b.sortMs, items: [] };
           var hasNeed = isInt(g.required) && g.required >= 1;
           buckets[b.key].items.push({
             key: g.id + '/' + (folderId || ''),
             gameName: gm.game.name,
-            common: folderId === null,
             pathText: folderId === null ? '공통' : path.join(' › '),
             groupName: g.name,
-            progress: hasNeed ? ev.need + '개 중 ' + Math.min(ev.doneCount, ev.need) + '개' : null,
+            progress: hasNeed ? ev.need + '개 중 ' + ev.doneCount + '개' : null,
             taskNames: names,
             _sort: [gi, folderId === null ? -1 : (folderOrder[folderId] === undefined ? 1e9 : folderOrder[folderId]), ci]
           });
@@ -817,7 +820,7 @@
         });
       });
     });
-    return order.map(function (k) { return buckets[k]; })
+    return Object.keys(buckets).map(function (k) { return buckets[k]; })
       .sort(function (a, b) { return a.sortMs === b.sortMs ? 0 : (a.sortMs < b.sortMs ? -1 : 1); })
       .map(function (b) {
         b.items.sort(function (x, y) { return x._sort[0] - y._sort[0] || x._sort[1] - y._sort[1] || x._sort[2] - y._sort[2]; });

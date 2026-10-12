@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>reset.js · store.js 테스트</title>
-  <link rel="stylesheet" href="../css/style.css?v=20261012-5">
+  <link rel="stylesheet" href="../css/style.css?v=20261012-7">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
     .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
@@ -50,9 +50,9 @@
   <div id="out"></div>
 </main>
 
-<script src="../js/reset.js?v=20261012-5"></script>
-<script src="../js/store.js?v=20261012-5"></script>
-<script src="../js/ui.js?v=20261012-5"></script>
+<script src="../js/reset.js?v=20261012-7"></script>
+<script src="../js/store.js?v=20261012-7"></script>
+<script src="../js/ui.js?v=20261012-7"></script>
 <script>
 (function () {
   'use strict';
@@ -70,6 +70,8 @@
   var suites = [];
   var cur = null;
   var htmlTexts = null; // 형제 HTML 파일의 글 (http로 열었을 때만 읽는다)
+  var htmlLoad = 'skip'; // 'skip'(file://라 읽지 않음) | 'failed'(http인데 읽지 못함) | 'ok'
+  var htmlError = null;
   function suite(name, fn) { suites.push({ name: name, fn: fn }); }
 
   function fmtDate(d) {
@@ -116,6 +118,8 @@
   function eq(name, thunk, expected) { run1(name, thunk, expected, same); }
   function has(name, thunk, expected) { run1(name, thunk, expected, covers); }
   function ok(name, thunk) { run1(name, thunk, true, same); }
+  // 건너뛴 검사: 통과도 실패도 아니고 합계에도 넣지 않는다 (화면에 따로 표시한다)
+  function skip(name, reason) { record(name + ' — 건너뜀: ' + reason, true); cur.cases[cur.cases.length - 1].skipped = true; }
 
   /* ---------- 자료 만들기 ---------- */
   function D(m, d, h, mi, s) { return new Date(2026, m - 1, d, h || 0, mi || 0, s || 0); }
@@ -602,6 +606,9 @@
     eq('42분과 59분은 다른 묶음', function () { return [k(M(0, 0, 42, 0)), k(M(0, 0, 59, 0))]; }, ['M42', 'M59']);
     eq('1시간은 H1, 1분은 M1', function () { return [k(M(0, 1, 0, 0)), k(60000)]; }, ['H1', 'M1']);
     eq('1분 미만은 같은 초: 42.1초와 42.9초는 S42', function () { return [k(42100), k(42900), k(41900)]; }, ['S42', 'S42', 'S41']);
+    eq('경계 ±1ms: 48시간 −1ms는 H47, 48시간은 D2 / 1시간 −1ms는 M59, 1시간은 H1 / 1분 −1ms는 S59, 1분은 M1', function () {
+      return [k(M(2, 0, 0, 0) - 1), k(M(2, 0, 0, 0)), k(M(0, 1, 0, 0) - 1), k(M(0, 1, 0, 0)), k(59999), k(60000)];
+    }, ['H47', 'D2', 'M59', 'H1', 'S59', 'M1']);
     eq('라벨: D-2 / 5시간 / 42분 / 42초', function () { return [R.bucketOf(M(2, 20, 0, 0)).label, R.bucketOf(M(0, 5, 12, 0)).label, R.bucketOf(M(0, 0, 42, 0)).label, R.bucketOf(42000).label]; }, ['D-2', '5시간', '42분', '42초']);
     eq('sortMs는 급할수록 작다 (정렬하면 42초 < 5분 < 5시간 < D-2)', function () {
       var list = [M(2, 20, 0, 0), M(0, 5, 12, 0), 42000, M(0, 0, 5, 0)];
@@ -654,8 +661,12 @@
 
   /* ---------- 배포 캐시: ?v= ---------- */
   suite('배포 캐시 (HTML의 script·css 주소에 ?v=값)', function () {
-    if (htmlTexts === null) {
-      ok('(file://로 열었거나 파일을 읽지 못해 이 검사는 건너뜀)', function () { return true; });
+    if (htmlLoad === 'skip') {
+      skip('HTML의 ?v= 검사', 'file://로 열어서 형제 HTML을 읽지 않았어요 (로컬 서버나 Pages 주소로 열면 돼요)');
+      return;
+    }
+    if (htmlLoad === 'failed') {
+      eq('형제 HTML 파일을 모두 읽어서 ?v= 검사를 할 수 있다', function () { return htmlError; }, null);
       return;
     }
     var VERSION_RE = /\?v=\d{8}-\d+$/;
@@ -1655,6 +1666,10 @@
       eq('활성 숙제가 없는 폴더(숙제를 전부 끔)는 hidden', function () { var d = board(); d.games[0].folders[1].off = ['tk1', 'tk2']; return nodeStates(eg(d), 'gr1').fc1; }, 'hidden');
       eq('열 머리 대상 수: 안 한 폴더만 센다 (끈 숙제 tk4는 본계정 아래를 뺀 캐릭터3 하나)', function () { return gp(eg(board()), 'gr2').columns.map(function (c) { return c.task.id + ':' + c.pending; }); }, ['tk3:3', 'tk4:1', 'tk6:3']);
       eq('묶음이 완료돼 회색인 칸은 열 머리 대상에서 빠진다 (캐릭터1이 묶음 기록으로 완료)', function () { return gp(eg(withRecs(board(), [], [grc('gr2', 'fc1', TODAY)])), 'gr2').columns.map(function (c) { return c.task.id + ':' + c.pending; }); }, ['tk3:2', 'tk4:1', 'tk6:2']);
+      eq('과거 ?now=: 그 기간에 아직 없던 숙제(tk3, 주간 기간이 끝난 뒤인 10/23 생성)는 열 머리 대상이 0이고 다른 숙제의 개수가 어긋나지 않는다', function () {
+        var d = board(); d.tasks.forEach(function (x) { if (x.id === 'tk3') x.createdAt = '2026-10-23T00:00:00'; });
+        return gp(eg(d), 'gr2').columns.map(function (c) { return c.task.id + ':' + c.pending; });
+      }, ['tk3:0', 'tk4:1', 'tk6:3']);
       eq('남은 기간: 일일 05:00은 12:00에 17시간(hours), 목록은 [ms] 하나', function () { var g = gp(eg(board()), 'gr1'); return [g.remaining.kind, g.remaining.text, g.remainingMs]; }, ['hours', '17시간', [61200000]]);
       eq('남은 기간: 1회 주기는 "기한 없음"이고 시간 목록이 비어 있다', function () { var g = gp(eg(board()), 'gr5'); return [g.remaining.text, g.remainingMs]; }, ['기한 없음', []]);
       eq('남은 기간: 주간 목 06:00은 12:00에 6일 18시간 → D-6', function () { var g = gp(eg(board()), 'gr2'); return [g.remaining.kind, g.remaining.label]; }, ['dday', 'D-6']);
@@ -1675,8 +1690,8 @@
     function ug(d, at) { return R.buildUrgent(d.games.map(function (g) { return R.evaluateGame({ game: g, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at || NOON }); })); }
     function bucket(list, label) { return list.filter(function (b) { return b.label === label; })[0]; }
     function keys(list, label) { var b = bucket(list, label); return b ? b.items.map(function (i) { return i.key; }) : null; }
-    function addCommon(d, gid, cycleId, taskId, name) {
-      d.groups.push({ id: gid, gameId: 'gm1', name: name || gid, cycleId: cycleId, scope: 'game', required: null, low: false });
+    function addCommon(d, gid, cycleId, taskId) {
+      d.groups.push({ id: gid, gameId: 'gm1', name: gid, cycleId: cycleId, scope: 'game', required: null, low: false });
       d.tasks.push({ id: taskId, groupId: gid, name: taskId, low: false, createdAt: '2026-10-01T00:00:00' });
     }
 
@@ -1686,8 +1701,8 @@
       eq('D-6 덩어리: 게임 공통 묶음이 폴더보다 먼저, 이어서 폴더 순', function () { return keys(ug(board()), 'D-6'); }, ['gr3/', 'gr2/fc1', 'gr2/fc2', 'gr2/fc3']);
       eq('게임 공통 줄은 폴더 경로 자리에 "공통", 폴더 줄은 위 단계부터 "본계정 › 캐릭터1"', function () {
         var l = ug(board()); var d6 = bucket(l, 'D-6').items; var h = bucket(l, '17시간').items;
-        return [d6[0].pathText, d6[0].common, d6[1].pathText, d6[1].common, h[0].pathText, h[1].pathText];
-      }, ['공통', true, '본계정 › 캐릭터1', false, '본계정', '본계정 › 캐릭터1']);
+        return [d6[0].pathText, d6[1].pathText, h[0].pathText, h[1].pathText];
+      }, ['공통', '본계정 › 캐릭터1', '본계정', '본계정 › 캐릭터1']);
       eq('필요 개수가 있는 묶음만 "2개 중 0개"가 붙고 없으면 null, 숙제 이름은 끈 숙제를 뺀다', function () {
         var d6 = bucket(ug(board()), 'D-6').items; var h = bucket(ug(board()), '17시간').items;
         return [d6[1].progress, d6[1].taskNames, d6[3].taskNames, d6[0].progress, h[1].progress];
@@ -1696,11 +1711,15 @@
       eq('"기한 없음" 덩어리는 1회 주기 묶음 (sortMs가 가장 크다)', function () { var l = ug(board()); var b = l[l.length - 1]; return [b.label, b.items.map(function (i) { return i.key; }), b.sortMs > l[1].sortMs]; }, ['기한 없음', ['gr5/'], true]);
       eq('다 한 폴더는 빠진다 (캐릭터1 일일 퀘스트 둘 다 함)', function () { return keys(ug(withRecs(board(), [rc('tk1', 'fc1', TODAY), rc('tk2', 'fc1', TODAY)])), '17시간'); }, ['gr4/fa1', 'gr1/fc2', 'gr4/fa2', 'gr1/fc3']);
       eq('일부만 한 폴더는 남고 안 한 숙제만 나온다', function () { var it = bucket(ug(withRecs(board(), [rc('tk1', 'fc1', TODAY)])), '17시간').items[1]; return [it.key, it.taskNames]; }, ['gr1/fc1', ['tk2']]);
-      eq('필요 개수를 채운 폴더는 남은 숙제가 있어도 빠지고, 하나 모자라면 남은 숙제와 "2개 중 1개"로 나온다', function () {
-        var full = ug(withRecs(board(), [rc('tk3', 'fc1', TODAY), rc('tk6', 'fc1', TODAY)]));
-        var part = bucket(ug(withRecs(board(), [rc('tk3', 'fc1', TODAY)])), 'D-6').items[1];
-        return [keys(full, 'D-6'), [part.key, part.progress, part.taskNames]];
-      }, [['gr3/', 'gr2/fc2', 'gr2/fc3'], ['gr2/fc1', '2개 중 1개', ['tk6']]]);
+      eq('필요 개수를 채운 폴더는 안 한 숙제가 남아 있어도 빠진다 (캐릭터3: 숙제 3개, 필요 2개, 2개 완료 → tk6가 남아도 줄이 없다)', function () {
+        var d = withRecs(board(), [rc('tk3', 'fc3', TODAY), rc('tk4', 'fc3', TODAY)]);
+        var row = gp(eg(d), 'gr2').byId.fc3.ev;
+        return [row.total, row.need, row.doneCount, row.tasks.filter(function (s) { return s.state !== 'done'; }).map(function (s) { return s.taskId; }), keys(ug(d), 'D-6')];
+      }, [3, 2, 2, ['tk6'], ['gr3/', 'gr2/fc1', 'gr2/fc2']]);
+      eq('필요 개수에 하나 모자라면 남은 숙제와 "2개 중 1개"로 나온다', function () {
+        var part = bucket(ug(withRecs(board(), [rc('tk3', 'fc3', TODAY)])), 'D-6').items.filter(function (i) { return i.key === 'gr2/fc3'; })[0];
+        return [part.progress, part.taskNames];
+      }, ['2개 중 1개', ['tk4', 'tk6']]);
       eq('묶음 완료 기록이 있는 폴더는 빠진다', function () { return keys(ug(withRecs(board(), [], [grc('gr2', 'fc1', TODAY)])), 'D-6'); }, ['gr3/', 'gr2/fc2', 'gr2/fc3']);
       eq('완료한 게임 공통 묶음은 빠진다', function () { return keys(ug(withRecs(board(), [rc('tk5', null, TODAY)])), 'D-6'); }, ['gr2/fc1', 'gr2/fc2', 'gr2/fc3']);
       eq('모두 완료돼 항목이 없는 덩어리는 만들어지지 않는다 (기한 없음 완료)', function () { return ug(withRecs(board(), [rc('tk8', null, TODAY)])).map(function (b) { return b.label; }); }, ['17시간', 'D-6']);
@@ -1718,18 +1737,43 @@
         addCommon(d, 'gx', 'cx', 'tx'); addCommon(d, 'gy', 'cy', 'ty');
         var l = ug(d); return [l.map(function (b) { return b.label; }), keys(l, '5시간')];
       }, [['5시간', '17시간', 'D-6', '기한 없음'], ['gx/', 'gy/']]);
-      eq('게임이 둘이면 같은 덩어리 안에서 게임 순서대로, 덩어리는 두 게임을 합쳐 급한 순', function () {
-        var d = board();
-        d.games.push({ id: 'gm2', name: '로아', cycles: [{ id: 'c2', name: '일일', type: 'daily', time: '17:30' }], levels: [], folders: [] });
-        d.groups.push({ id: 'h1', gameId: 'gm2', name: '일일', cycleId: 'c2', scope: 'game', required: null, low: false });
-        d.tasks.push({ id: 'ht', groupId: 'h1', name: 'ht', low: false, createdAt: '2026-10-01T00:00:00' });
-        var l = ug(d); return [l.map(function (b) { return b.label; }), bucket(l, '5시간').items.map(function (i) { return i.gameName + ':' + i.pathText; })];
-      }, [['5시간', '17시간', 'D-6', '기한 없음'], ['로아:공통']]);
-      eq('받은 판정 결과를 바꾸지 않는다', function () {
-        var m = eg(board()); var before = JSON.stringify(m.groups.map(function (g) { return [g.ev, g.nodes && g.nodes.map(function (n) { return n.ev; })]; }));
-        R.buildUrgent([m]); return before === JSON.stringify(m.groups.map(function (g) { return [g.ev, g.nodes && g.nodes.map(function (n) { return n.ev; })]; }));
-      }, true);
-      eq('게임이 없거나 묶음이 없으면 빈 목록', function () { var d = board(); d.groups = []; d.tasks = []; return [ug(d), R.buildUrgent([]), R.buildUrgent()]; }, [[], [], []]);
+      eq('같은 덩어리 안의 게임 순서는 입력 순서다 (이름순도 마감순도 아님): 입력 다·가·나, 마감은 가(17:10)·나(17:30)·다(17:50)', function () {
+        var d = board(); d.groups = []; d.tasks = []; d.games = [];
+        function game(id, name, time) {
+          d.games.push({ id: id, name: name, cycles: [{ id: 'c' + id, name: '일', type: 'daily', time: time }], levels: [], folders: [] });
+          d.groups.push({ id: 'g' + id, gameId: id, name: '묶' + id, cycleId: 'c' + id, scope: 'game', required: null, low: false });
+          d.tasks.push({ id: 't' + id, groupId: 'g' + id, name: 't' + id, low: false, createdAt: '2026-10-01T00:00:00' });
+        }
+        game('z', '다', '17:50'); game('y', '가', '17:10'); game('x', '나', '17:30'); game('w', '라', '23:00');
+        var l = ug(d);
+        return [l.map(function (b) { return b.label; }), bucket(l, '5시간').items.map(function (i) { return i.gameName + ':' + i.pathText + ':' + i.groupName; }), bucket(l, '11시간').items.map(function (i) { return i.gameName; })];
+      }, [['5시간', '11시간'], ['다:공통:묶z', '가:공통:묶y', '나:공통:묶x'], ['라']]);
+      eq('같은 분은 한 덩어리: 42분 20초와 42분 50초는 "42분", 같은 초: 42.1초와 42.9초는 "42초"', function () {
+        var d = board(); var cs = d.games[0].cycles;
+        [['ca', '2026-10-01T12:42:20'], ['cb', '2026-10-01T12:42:50'], ['cc', '2026-10-01T12:00:42.100'], ['cd2', '2026-10-01T12:00:42.900']].forEach(function (x) { cs.push({ id: x[0], name: x[0], type: 'interval', anchor: x[1], every: { days: 1 } }); });
+        addCommon(d, 'ga', 'ca', 'ta'); addCommon(d, 'gb', 'cb', 'tb'); addCommon(d, 'gc', 'cc', 'tc'); addCommon(d, 'gd', 'cd2', 'td');
+        var l = ug(d); return [l.slice(0, 2).map(function (b) { return b.label; }), keys(l, '42초'), keys(l, '42분')];
+      }, [['42초', '42분'], ['gc/', 'gd/'], ['ga/', 'gb/']]);
+      eq('받은 판정 결과를 바꾸지 않는다 (입력 전체를 얼려 두고 호출, 호출 전후 스냅샷 비교)', function () {
+        var d = withRecs(board(), [rc('tk1', 'fc1', TODAY)]); var m = eg(d);
+        var before = JSON.stringify([m]); deepFreeze(m);
+        var out = R.buildUrgent([m]);
+        return [before === JSON.stringify([m]), out.length > 0];
+      }, [true, true]);
+      eq('게임이 없거나 묶음이 없으면 빈 목록', function () { var d = board(); d.groups = []; d.tasks = []; return [ug(d), R.buildUrgent([])]; }, [[], []]);
+      eq('나중에 만든 숙제가 앞에 있어도 이름이 어긋나지 않는다 (A 10/17 생성, B 10/01 생성·미완료, 10/15 12:00 → B만 나온다)', function () {
+        var d = board(); d.groups.push({ id: 'ga', gameId: 'gm1', name: 'ga', cycleId: 'cd', scope: 'game', required: null, low: false });
+        d.tasks.push({ id: 'tA', groupId: 'ga', name: 'A', low: false, createdAt: iso(10, 17, 0, 0) }, { id: 'tB', groupId: 'ga', name: 'B', low: false, createdAt: iso(10, 1, 0, 0) });
+        var it = bucket(ug(d), '17시간').items.filter(function (i) { return i.key === 'ga/'; })[0];
+        return it && it.taskNames;
+      }, ['B']);
+      eq('나중에 만든 숙제 A가 낮음이어도 B는 사라지지 않고, B를 완료하면 줄이 빠진다 (A는 아직 없음)', function () {
+        var d = board(); d.groups.push({ id: 'ga', gameId: 'gm1', name: 'ga', cycleId: 'cd', scope: 'game', required: null, low: false });
+        d.tasks.push({ id: 'tA', groupId: 'ga', name: 'A', low: true, createdAt: iso(10, 17, 0, 0) }, { id: 'tB', groupId: 'ga', name: 'B', low: false, createdAt: iso(10, 1, 0, 0) });
+        var open = keys(ug(d), '17시간').indexOf('ga/') >= 0;
+        var done = keys(ug(withRecs(d, [rc('tB', null, TODAY)])), '17시간').indexOf('ga/') >= 0;
+        return [open, done];
+      }, [true, false]);
       eq('리셋 경계: 04:59에는 완료한 캐릭터1이 빠져 있고(1분 덩어리), 05:00 리셋 직후에는 다시 나온다(24시간 덩어리)', function () {
         var d = withRecs(board(), [rc('tk1', 'fc1', TODAY), rc('tk2', 'fc1', TODAY)]);
         var before = keys(ug(d, D(10, 16, 4, 59)), '1분'), after = keys(ug(d, D(10, 16, 5, 0)), '24시간');
@@ -1918,7 +1962,7 @@
         return [m.r.ok, m.r.added, m.d.records, m.valid.ok];
       }, [true, 1, [{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T12:00:00' }], true]);
       eq('같은 칸을 다시 체크하면 noop (이미 이번 기간에 완료)', function () { var m = mut(function (d) { return O.checkTask(d, 'tk1', 'fc1', AT); }, withRecs(board(), [rc('tk1', 'fc1', TODAY)])); return [m.r.noop, m.d.records.length]; }, [true, 1]);
-      eq('다른 폴더·다른 숙제는 따로 체크된다', function () { var m = mut(function (d) { O.checkTask(d, 'tk1', 'fc1', AT); return O.checkTask(d, 'tk1', 'fc2', AT); }, board()); return m.d.records.map(function (r) { return r.taskId + '/' + r.folderId; }); }, ['tk1/fc1', 'tk1/fc2']);
+      eq('다른 폴더·다른 숙제는 따로 체크된다', function () { var m = mut(function (d) { O.checkTask(d, 'tk1', 'fc1', AT); O.checkTask(d, 'tk2', 'fc1', AT); return O.checkTask(d, 'tk1', 'fc2', AT); }, board()); return m.d.records.map(function (r) { return r.taskId + '/' + r.folderId; }); }, ['tk1/fc1', 'tk2/fc1', 'tk1/fc2']);
       eq('지난 기간(어제 21:00) 기록이 있어도 오늘은 다시 체크된다', function () { var m = mut(function (d) { return O.checkTask(d, 'tk1', 'fc1', AT); }, withRecs(board(), [rc('tk1', 'fc1', D(10, 14, 21, 0))])); return [m.r.added, m.d.records.length]; }, [1, 2]);
       eq('게임 공통 숙제는 folderId 없이 체크한다', function () { var m = mut(function (d) { return O.checkTask(d, 'tk5', null, AT); }, board()); return [m.r.ok, m.d.records[0].folderId]; }, [true, null]);
       eq('거부: 게임 공통 숙제에 폴더, 단계 범위 숙제에 폴더 없음, 범위가 아닌 단계(계정)의 폴더, 없는 숙제, 잘못된 시각', function () {
@@ -1930,6 +1974,16 @@
         var r2 = O.checkTask(clone(d), 'tk1', 'fc2', AT); return [r1.ok, r1.error.indexOf('하지 않는') >= 0, r2.ok];
       }, [false, true, false]);
 
+      eq('해제도 같은 검사를 한다: 끈 칸(숙제·묶음), 폴더 없음, 게임 공통에 폴더, 범위 아닌 단계, 없는 숙제, 잘못된 시각 → 오류이고 기록은 그대로, 체크와 같은 결과', function () {
+        var d = withRecs(board(), [rc('tk1', 'fc1', TODAY), rc('tk4', 'fc3', TODAY), rc('tk5', null, TODAY)]);
+        d.games[0].folders[0].off = ['tk1', 'gr2'];
+        var cases = [['tk1', 'fc1'], ['tk3', 'fc1'], ['tk1', null], ['tk5', 'fc1'], ['tk1', 'fa1'], ['nope', 'fc1'], ['tk1', 'fc1', 'bad']];
+        return cases.map(function (c) {
+          var a = clone(d), b = clone(d), at = c[2] === 'bad' ? '2026-10-15' : AT;
+          var ru = O.uncheckTask(a, c[0], c[1], at), rk = O.checkTask(b, c[0], c[1], at);
+          return [ru.ok, rk.ok, JSON.stringify(a) === JSON.stringify(d), JSON.stringify(b) === JSON.stringify(d)];
+        });
+      }, [[false, false, true, true], [false, false, true, true], [false, false, true, true], [false, false, true, true], [false, false, true, true], [false, false, true, true], [false, false, true, true]]);
       eq('칸 해제: 그 숙제·그 폴더의 이번 기간 기록만 지운다 (지난 기간, 다른 폴더, 다른 숙제는 남는다)', function () {
         var d = withRecs(board(), [rc('tk1', 'fc1', D(10, 14, 21, 0)), rc('tk1', 'fc1', TODAY), rc('tk1', 'fc2', TODAY), rc('tk2', 'fc1', TODAY)]);
         var m = mut(function (x) { return O.uncheckTask(x, 'tk1', 'fc1', AT); }, d);
@@ -2018,11 +2072,13 @@
         var m = mut(function (x) { return O.uncheckFolder(x, 'gr2', 'fc1', AT); }, d); return [m.r.removed, m.d.records.length, m.d.groupRecords.map(function (r) { return r.doneAt.slice(5, 16); })];
       }, [2, 0, ['10-08T07:00']]);
       eq('폴더 체크 해제: 지울 것이 없으면 noop, 범위보다 아래 폴더는 거부', function () { return [O.uncheckFolder(board(), 'gr1', 'fc1', AT).noop, O.uncheckFolder(board(), 'gr4', 'fc1', AT).ok]; }, [true, false]);
-      eq('체크 → 폴더 해제 → 체크가 같은 상태로 돌아온다 (판정 일치)', function () {
-        var x = storeWith(board()); x.st.checkFolder({ groupId: 'gr1', folderId: 'fa1', at: AT });
-        var once = nodeStates(eg(JSON.parse(x.fs.items[KEY])), 'gr1'); x.st.uncheckFolder({ groupId: 'gr1', folderId: 'fa1', at: AT });
-        var cleared = nodeStates(eg(JSON.parse(x.fs.items[KEY])), 'gr1'); return [once, cleared];
-      }, [{ fa1: 'all', fc1: 'all', fc2: 'all', fa2: 'none', fc3: 'none' }, { fa1: 'none', fc1: 'none', fc2: 'none', fa2: 'none', fc3: 'none' }]);
+      eq('체크 → 폴더 해제 → 다시 체크가 처음 체크와 같은 상태로 돌아온다 (판정 일치)', function () {
+        var x = storeWith(board()); var st = function () { return nodeStates(eg(JSON.parse(x.fs.items[KEY])), 'gr1'); };
+        x.st.checkFolder({ groupId: 'gr1', folderId: 'fa1', at: AT }); var once = st();
+        x.st.uncheckFolder({ groupId: 'gr1', folderId: 'fa1', at: AT }); var cleared = st();
+        x.st.checkFolder({ groupId: 'gr1', folderId: 'fa1', at: AT }); var again = st();
+        return [once, cleared, again];
+      }, [{ fa1: 'all', fc1: 'all', fc2: 'all', fa2: 'none', fc3: 'none' }, { fa1: 'none', fc1: 'none', fc2: 'none', fa2: 'none', fc3: 'none' }, { fa1: 'all', fc1: 'all', fc2: 'all', fa2: 'none', fc3: 'none' }]);
     });
 
     suite('ops: 묶음', function () {
@@ -2110,28 +2166,30 @@
   /* ---------- 실행과 화면 ---------- */
   function runAll() {
     out.textContent = '';
-    var total = 0, passed = 0, failures = [];
+    var total = 0, passed = 0, skippedCount = 0, failures = [];
     window.__cases = [];
     suites.forEach(function (s) {
       cur = { name: s.name, cases: [] };
       try { s.fn(); } catch (e) { record('(묶음 실행 중 예외)', false, undefined, undefined, e); }
       cur.cases.forEach(function (c) { window.__cases.push({ suite: s.name, name: c.name, src: c.src, expected: show(c.expected) }); });
-      var p = cur.cases.filter(function (c) { return c.pass; }).length;
-      total += cur.cases.length;
+      var counted = cur.cases.filter(function (c) { return !c.skipped; });
+      var p = counted.filter(function (c) { return c.pass; }).length;
+      skippedCount += cur.cases.length - counted.length;
+      total += counted.length;
       passed += p;
 
       var d = document.createElement('details');
       d.className = 'suite';
-      d.open = p !== cur.cases.length;
+      d.open = p !== counted.length;
       var sm = document.createElement('summary');
       var nm = document.createElement('span'); nm.className = 'suite-name'; nm.textContent = s.name;
-      var bd = document.createElement('span'); bd.className = 'badge' + (p === cur.cases.length ? '' : ' fail'); bd.textContent = p + ' / ' + cur.cases.length;
+      var bd = document.createElement('span'); bd.className = 'badge' + (p === counted.length ? '' : ' fail'); bd.textContent = p + ' / ' + counted.length + (counted.length < cur.cases.length ? ' (건너뜀 ' + (cur.cases.length - counted.length) + ')' : '');
       sm.appendChild(nm); sm.appendChild(bd); d.appendChild(sm);
       var ul = document.createElement('ul'); ul.className = 'cases';
       cur.cases.forEach(function (c) {
         var li = document.createElement('li');
-        li.className = c.pass ? 'pass' : 'fail';
-        var mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = c.pass ? '✓' : '✗';
+        li.className = c.skipped ? 'pass skip' : (c.pass ? 'pass' : 'fail');
+        var mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = c.skipped ? '–' : (c.pass ? '✓' : '✗');
         li.appendChild(mark); li.appendChild(document.createTextNode(c.name));
         if (!c.pass) {
           failures.push(s.name + ' › ' + c.name);
@@ -2146,7 +2204,7 @@
     });
 
     var failed = total - passed;
-    document.getElementById('sum-text').textContent = '전체 ' + total + '개 중 통과 ' + passed + ' · 실패 ' + failed;
+    document.getElementById('sum-text').textContent = '전체 ' + total + '개 중 통과 ' + passed + ' · 실패 ' + failed + (skippedCount ? ' · 건너뜀 ' + skippedCount : '');
     var fb = document.getElementById('sum-fail');
     fb.hidden = failed === 0;
     fb.className = 'badge fail';
@@ -2154,7 +2212,7 @@
     document.title = (failed ? '(실패 ' + failed + ') ' : '') + 'reset.js · store.js 테스트';
     var info = R.nowInfo();
     document.getElementById('nowline').textContent = '현재 시각 ' + fmtDate(info.date) + (info.isTest ? ' (테스트 시각)' : '') + (info.error ? ' · ' + info.error : '');
-    window.__testResult = { total: total, passed: passed, failed: failed, failures: failures };
+    window.__testResult = { total: total, passed: passed, failed: failed, skipped: skippedCount, failures: failures };
   }
 
   document.getElementById('rerun').addEventListener('click', runAll);
@@ -2163,12 +2221,13 @@
   // 형제 HTML(?v= 검사용)을 읽은 뒤 실행한다. file://이면 읽지 않고 바로 실행한다.
   var HTML_FILES = { 'index.html': '../index.html', 'settings.html': '../settings.html', 'history.html': '../history.html', 'tests.html': 'tests.html', 'architecture.html': 'architecture.html' };
   if (location.protocol === 'file:' || !window.fetch) {
+    htmlLoad = 'skip';
     runAll();
   } else {
     var names = Object.keys(HTML_FILES);
-    Promise.all(names.map(function (n) { return fetch(HTML_FILES[n], { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('읽기 실패'); return r.text(); }); }))
-      .then(function (texts) { htmlTexts = {}; names.forEach(function (n, i) { htmlTexts[n] = texts[i]; }); runAll(); },
-            function () { htmlTexts = null; runAll(); });
+    Promise.all(names.map(function (n) { return fetch(HTML_FILES[n], { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(HTML_FILES[n] + ' 읽기 실패 (' + r.status + ')'); return r.text(); }); }))
+      .then(function (texts) { htmlTexts = {}; names.forEach(function (n, i) { htmlTexts[n] = texts[i]; }); htmlLoad = 'ok'; runAll(); },
+            function (e) { htmlTexts = null; htmlLoad = 'failed'; htmlError = (e && e.message) || String(e); runAll(); });
   }
 })();
 </script>

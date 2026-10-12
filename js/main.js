@@ -26,11 +26,9 @@
 
   /* ---------- 판정 ---------- */
 
-  function buildModel() {
+  function buildModel(at) {
     var d = Store.get();
-    var at = Reset.now();
     return {
-      d: d, at: at,
       games: d.games.map(function (g) {
         return Reset.evaluateGame({ game: g, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at });
       })
@@ -118,7 +116,7 @@
 
   function groupBlock(gm, gg) {
     var g = gg.group;
-    var ref = { gg: gg, mark: el('span', { class: 'gb-mark', hidden: true, role: 'img', 'aria-label': '완료', text: '✓' }),
+    var ref = { mark: el('span', { class: 'gb-mark', hidden: true, role: 'img', 'aria-label': '완료', text: '✓' }),
       progress: el('span', { class: 'gb-progress' }), remaining: el('span', { class: 'gb-remaining' }), rows: Object.create(null), nodes: Object.create(null), tasks: Object.create(null), cols: Object.create(null) };
     state.refs[g.id] = ref;
     var head = el('div', { class: 'gb-head' }, [
@@ -130,7 +128,7 @@
     if (!gg.tasks.length) body = el('p', { class: 'empty', text: '숙제가 없어요.' });
     else if (gg.kind === 'folders' && !gg.nodes.length) body = el('p', { class: 'empty', text: '폴더가 없어요. 설정에서 "' + gm.game.levels[g.scope - 1] + '" 폴더를 추가하면 여기에 표가 나와요.' });
     else if (gg.kind === 'game') body = taskList(gg, ref);
-    else body = board(gm, gg, ref);
+    else body = board(gg, ref);
     return el('div', { class: 'gb', 'data-group': g.id }, [head, body]);
   }
 
@@ -150,7 +148,7 @@
   }
 
   // 단계 범위 묶음: 표 (행 = 범위 단계 폴더, 열 = 숙제)
-  function board(gm, gg, ref) {
+  function board(gg, ref) {
     var g = gg.group;
     var headRow = el('tr', {}, [el('th', { class: 'fcol', scope: 'col', text: '폴더' })]);
     gg.tasks.forEach(function (t) {
@@ -171,7 +169,7 @@
       var tr;
       if (!n.isRow) {
         var count = el('span', { class: 'node-count' });
-        tr = el('tr', { class: 'node', 'data-anc': anc.join(',') }, [
+        tr = el('tr', { class: 'node' }, [
           el('td', { class: 'fcol', colspan: colSpan }, [indent, toggle, el('label', { class: 'check' }, [fbox, el('strong', { class: 'row-name', text: f.name })]), count])
         ]);
         ref.nodes[f.id] = { tr: tr, fbox: fbox, count: count, toggle: toggle, anc: anc };
@@ -182,7 +180,7 @@
           var td = el('td', { class: 'cell', 'data-label': t.name }, [box]);
           return { td: td, box: box };
         });
-        tr = el('tr', { class: 'frow', 'data-anc': anc.join(',') }, [
+        tr = el('tr', { class: 'frow' }, [
           el('td', { class: 'fcol' }, [indent, toggle, el('label', { class: 'check' }, [fbox, el('span', { class: 'row-name', text: f.name })])])
         ].concat(cells.map(function (c) { return c.td; })).concat([prog]));
         ref.rows[f.id] = { tr: tr, fbox: fbox, cells: cells, prog: prog, toggle: toggle, anc: anc };
@@ -201,7 +199,6 @@
       gm.groups.forEach(function (gg) {
         var ref = state.refs[gg.group.id];
         if (!ref) return;
-        ref.gg = gg;
         patchHead(ref, gg);
         if (gg.kind === 'game') patchList(ref, gg);
         else if (gg.tasks.length && ref.table) patchBoard(ref, gg);
@@ -222,11 +219,15 @@
 
   function patchList(ref, gg) {
     if (!ref.list) return;
-    var ev = gg.ev;
+    var byTask = Object.create(null);
+    gg.ev.tasks.forEach(function (s) { byTask[s.taskId] = s; });
     var order = [];
-    ev.tasks.forEach(function (s, i) {
-      var t = gg.tasks[i], r = ref.tasks[t.id];
+    gg.tasks.forEach(function (t, i) {
+      var r = ref.tasks[t.id];
       if (!r) return;
+      var s = byTask[t.id];
+      r.li.hidden = !s; // 그 기간에 아직 없던 숙제(과거 ?now=)는 목록에서 숨긴다
+      if (!s) return;
       r.box.checked = s.state === 'done';
       r.box.disabled = s.state === 'skipped';
       r.li.classList.toggle('is-done', s.state === 'done');
@@ -240,7 +241,12 @@
     order.sort(function (a, b) { return a.rank - b.rank || a.i - b.i; });
     var cur = Array.prototype.map.call(ref.list.children, function (li) { return li.getAttribute('data-task'); });
     var want = order.map(function (o) { return o.id; });
-    if (cur.join('|') !== want.join('|')) want.forEach(function (id) { ref.list.appendChild(ref.tasks[id].li); });
+    if (cur.join('|') !== want.join('|')) {
+      // 자리를 옮기려고 다시 끼워 넣으면 키보드 포커스가 사라지므로, 포커스가 이 목록 안에 있었다면 되돌린다
+      var active = document.activeElement, keep = active && ref.list.contains(active) ? active : null;
+      want.forEach(function (id) { ref.list.appendChild(ref.tasks[id].li); });
+      if (keep && document.activeElement !== keep) keep.focus();
+    }
   }
 
   function patchBoard(ref, gg) {
@@ -263,11 +269,13 @@
       setText(r.toggle, closed ? '▸' : '▾');
       if (n.isRow) {
         r.tr.classList.toggle('is-collapsed', closed);
-        r.tr.classList.toggle('is-off', n.ev.off || n.ev.empty);
+        r.tr.classList.toggle('is-off', n.ev.empty);
         r.tr.classList.toggle('is-done', n.ev.done);
         setText(r.prog, n.ev.off ? '안 함' : progressText(n.ev));
+        var byTask = Object.create(null);
+        n.ev.tasks.forEach(function (x) { byTask[x.taskId] = x; });
         r.cells.forEach(function (c, i) {
-          var s = n.ev.tasks[i]; // 묶음을 끈 폴더는 숙제 상태가 없다
+          var s = byTask[gg.tasks[i].id]; // 묶음을 끈 폴더나 그 기간에 아직 없던 숙제는 상태가 없다 → 빈 칸
           c.td.classList.toggle('is-off', !s || s.state === 'off');
           c.td.classList.toggle('is-skipped', !!s && s.state === 'skipped');
           c.box.checked = !!s && s.state === 'done';
@@ -338,7 +346,7 @@
       if (full) t.classList.remove('as-list'); // 표 상태에서 재야 하니 먼저 표로 돌린다
       if (t.classList.contains('as-list')) return;
       // 넘치거나, 폴더 이름 칸이 줄바꿈될 만큼 좁아지면 목록으로 바꾼다
-      var first = t.querySelector('tr.frow td.fcol');
+      var first = t.querySelector('tr.frow:not([hidden]) td.fcol'); // 접혀서 숨은 행은 재지 않는다
       var narrow = first ? first.offsetWidth < 130 : false;
       t.classList.toggle('as-list', t.offsetWidth > wrap.clientWidth + 1 || narrow);
     });
@@ -367,7 +375,7 @@
     clearTimeout(state.timer);
     if (UI.isDialogOpen()) { UI.whenDialogsClosed(refreshAfterDialogs); return; }
     if (!force && pointerHeld()) { state.timer = setTimeout(function () { refresh(false); }, 250); return; }
-    var model = buildModel();
+    var model = buildModel(Reset.now());
     var key = structKey(model);
     var rebuilt = key !== state.key;
     if (rebuilt) { buildAll(model); state.key = key; }
@@ -380,17 +388,25 @@
 
   /* ---------- 체크 ---------- */
 
-  function findGroup(groupId) {
-    var found = null;
-    if (state.model) state.model.games.forEach(function (gm) { gm.groups.forEach(function (gg) { if (gg.group.id === groupId) found = gg; }); });
-    return found;
+  // 누르는 순간의 최신 데이터와 시각으로 그 묶음을 판정한다. 눌러 둔 동안 화면 갱신이 미뤄져서 화면 모델이
+  // 오래됐을 수 있으니, 개수를 세거나 확인 창을 정할 때는 화면 모델(state.model)을 쓰지 않는다.
+  function freshGroup(groupId) {
+    var at = Reset.now(), found = null;
+    buildModel(at).games.forEach(function (gm) { gm.groups.forEach(function (gg) { if (gg.group.id === groupId) found = gg; }); });
+    return found ? { gg: found, at: at } : null;
   }
 
-  // 실패하면 페이지 안 안내로 알리고 false
+  // 묶음의 지금 기간을 가리키는 값 (확인 창이 열려 있는 동안 리셋이 지났는지 비교한다)
+  function periodKey(cycle, at) {
+    var p = Reset.currentPeriod(cycle, at);
+    return p.start ? p.start.getTime() : 'once';
+  }
+
+  var EXPIRED = { ok: false, error: '리셋 시각이 지나서 취소했어요. 다시 눌러 주세요.' };
+
+  // 실패하면 페이지 안 안내로 알린다
   function report(r) {
-    if (!r.ok) { UI.notice(r.error); return false; }
-    UI.notice('');
-    return true;
+    UI.notice(r.ok ? '' : r.error);
   }
 
   function onCell(box) {
@@ -399,51 +415,64 @@
     refresh(true);
   }
 
+  // 확인 창을 거쳐 저장한다. 창이 열려 있는 동안 리셋이 지났으면 저장하지 않고 안내만 한다.
+  function confirmThenSave(opts) {
+    var key = periodKey(opts.cycle, opts.at);
+    UI.confirm({
+      title: opts.title, message: opts.message, confirmLabel: opts.confirmLabel, danger: opts.danger,
+      onConfirm: function () {
+        if (periodKey(opts.cycle, Reset.now()) !== key) return EXPIRED;
+        var r = opts.save(Reset.now());
+        return r.ok ? { ok: true } : r;
+      }
+    }).then(function () { refresh(true); });
+  }
+
   function onFolderCheck(box) {
     var groupId = box.getAttribute('data-group'), folderId = box.getAttribute('data-folder');
-    var gg = findGroup(groupId), node = gg && gg.byId ? gg.byId[folderId] : null;
+    var fresh = freshGroup(groupId), node = fresh && fresh.gg.byId ? fresh.gg.byId[folderId] : null;
     if (!node) { refresh(true); return; }
-    var name = node.folder.name, cb = node.checkbox, args = { groupId: groupId, folderId: folderId };
+    var name = node.folder.name, cb = node.checkbox, cycle = fresh.gg.cycle;
+    function save(at) { return (cb.state === 'all' ? Store.uncheckFolder : Store.checkFolder)({ groupId: groupId, folderId: folderId, at: at }); }
     if (cb.state === 'all') {
       // 완료한 폴더의 체크를 풀면 확인 창을 거쳐 이번 기간 기록만 지운다
-      UI.confirm({
+      confirmThenSave({
         title: '"' + name + '" 체크를 해제할까요?',
-        message: '이 폴더' + (cb.targets > 1 ? '(와 아래 폴더) ' + cb.targets + '곳' : '') + '의 이번 기간 완료 기록을 지워요. 지난 기간 기록은 그대로예요.',
-        confirmLabel: '해제', danger: true,
-        onConfirm: function () { var r = Store.uncheckFolder(Object.assign({ at: Reset.now() }, args)); return r.ok ? { ok: true } : r; }
-      }).then(function () { refresh(true); });
+        message: (node.isRow ? '이 폴더' : '이 폴더와 아래 폴더') + '의 이번 기간 완료 기록을 지워요. 지난 기간 기록은 그대로예요.',
+        confirmLabel: '해제', danger: true, cycle: cycle, at: fresh.at, save: save
+      });
     } else if (cb.pending >= 2) {
       // 상위 폴더처럼 여러 곳이 한 번에 바뀔 때는 확인 창
-      UI.confirm({
+      confirmThenSave({
         title: '"' + name + '" 아래 ' + cb.pending + '곳을 완료 처리할까요?',
         message: '안 한 폴더마다 이번 기간 완료 기록을 남겨요. 이미 한 것과 끈 것은 건너뛰어요.',
-        confirmLabel: '완료 처리',
-        onConfirm: function () { var r = Store.checkFolder(Object.assign({ at: Reset.now() }, args)); return r.ok ? { ok: true } : r; }
-      }).then(function () { refresh(true); });
+        confirmLabel: '완료 처리', cycle: cycle, at: fresh.at, save: save
+      });
     } else {
-      report(Store.checkFolder(Object.assign({ at: Reset.now() }, args)));
+      report(save(fresh.at));
       refresh(true);
     }
   }
 
   function onColumn(btn) {
     var groupId = btn.getAttribute('data-group'), taskId = btn.getAttribute('data-col');
-    var gg = findGroup(groupId);
-    if (!gg) return;
-    var col = gg.columns.filter(function (c) { return c.task.id === taskId; })[0];
-    if (!col || col.pending === 0) return;
-    UI.confirm({
+    var fresh = freshGroup(groupId);
+    if (!fresh) return;
+    var col = fresh.gg.columns.filter(function (c) { return c.task.id === taskId; })[0];
+    if (!col || col.pending === 0) { refresh(true); return; }
+    confirmThenSave({
       title: '"' + col.task.name + '" 숙제를 완료 처리할까요?',
       message: '이 표에서 아직 안 한 ' + col.pending + '곳에 이번 기간 완료 기록을 남겨요. 이미 한 것과 끈 것은 건너뛰어요.',
-      confirmLabel: '완료 처리',
-      onConfirm: function () { var r = Store.checkColumn({ taskId: taskId, at: Reset.now() }); return r.ok ? { ok: true } : r; }
-    }).then(function () { refresh(true); });
+      confirmLabel: '완료 처리', cycle: fresh.gg.cycle, at: fresh.at,
+      save: function (at) { return Store.checkColumn({ taskId: taskId, at: at }); }
+    });
   }
 
   function onToggle(btn) {
     var key = btn.getAttribute('data-toggle');
     state.collapsed[key] = !state.collapsed[key];
     if (state.model) patch(state.model);
+    fitBoards(true); // 접고 펼친 뒤에는 보이는 행으로 다시 잰다
   }
 
   /* ---------- 시작 ---------- */

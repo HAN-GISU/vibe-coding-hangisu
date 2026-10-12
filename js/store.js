@@ -1021,38 +1021,43 @@
       return { ctx: ctx };
     }
 
-    // 칸 하나 체크: 그 칸이 이번 기간에 완료가 아니면 완료 기록 하나. 이미 완료면 noop.
-    function checkTask(d, taskId, folderId, at) {
-      if (!validAt(at)) return fail(BAD_AT);
-      var task = findTask(d, taskId); if (!task) return fail('숙제를 찾을 수 없어요.');
+    // 칸 하나(숙제 + 폴더)의 공통 검사. 체크와 해제가 같은 규칙을 쓴다:
+    //   숙제가 있어야 하고, 게임 공통이면 폴더가 없어야 하고, 단계 범위면 그 단계의 폴더여야 하며, 그 폴더가 끈 숙제·묶음이면 오류다.
+    function cellContext(d, taskId, folderId) {
+      var task = findTask(d, taskId); if (!task) return { error: '숙제를 찾을 수 없어요.' };
       var ctx = groupContext(d, task.groupId);
       var fid = folderId === undefined || folderId === null ? null : folderId;
       if (typeof ctx.group.scope !== 'number') {
-        if (fid !== null) return fail('게임 공통 숙제에는 폴더가 없어요.');
+        if (fid !== null) return { error: '게임 공통 숙제에는 폴더가 없어요.' };
       } else {
         var loc = typeof fid === 'string' ? findFolder(d, fid) : null;
         if (!loc || loc.game.id !== ctx.game.id || loc.folder.level !== ctx.group.scope) {
-          return fail('이 숙제는 "' + ctx.game.levels[ctx.group.scope - 1] + '" 단계의 폴더마다 체크해요.');
+          return { error: '이 숙제는 "' + ctx.game.levels[ctx.group.scope - 1] + '" 단계의 폴더마다 체크해요.' };
         }
         if (global.Reset.isOff(ctx.game.folders, fid, task.id) || global.Reset.isOff(ctx.game.folders, fid, ctx.group.id)) {
-          return fail('이 폴더에서는 하지 않는 숙제예요.');
+          return { error: '이 폴더에서는 하지 않는 숙제예요.' };
         }
       }
-      if (global.Reset.isTaskDone({ cycle: ctx.cycle, taskId: taskId, folderId: fid, records: d.records, at: at })) return { ok: true, noop: true };
-      d.records.push({ taskId: taskId, folderId: fid, doneAt: global.Reset.formatIso(at) });
+      return { task: task, ctx: ctx, fid: fid };
+    }
+
+    // 칸 하나 체크: 그 칸이 이번 기간에 완료가 아니면 완료 기록 하나. 이미 완료면 noop.
+    function checkTask(d, taskId, folderId, at) {
+      if (!validAt(at)) return fail(BAD_AT);
+      var c = cellContext(d, taskId, folderId); if (c.error) return fail(c.error);
+      if (global.Reset.isTaskDone({ cycle: c.ctx.cycle, taskId: taskId, folderId: c.fid, records: d.records, at: at })) return { ok: true, noop: true };
+      d.records.push({ taskId: taskId, folderId: c.fid, doneAt: global.Reset.formatIso(at) });
       return { ok: true, added: 1 };
     }
 
-    // 칸 하나 해제: 그 숙제·그 폴더의 이번 기간 기록만 지운다. 지난 기간 기록은 건드리지 않는다.
+    // 칸 하나 해제: 그 숙제·그 폴더의 이번 기간 기록만 지운다. 지난 기간 기록은 건드리지 않는다. 끈 칸은 체크처럼 오류다.
     function uncheckTask(d, taskId, folderId, at) {
       if (!validAt(at)) return fail(BAD_AT);
-      var task = findTask(d, taskId); if (!task) return fail('숙제를 찾을 수 없어요.');
-      var ctx = groupContext(d, task.groupId);
-      var fid = folderId === undefined || folderId === null ? null : folderId;
-      var period = global.Reset.currentPeriod(ctx.cycle, at);
+      var c = cellContext(d, taskId, folderId); if (c.error) return fail(c.error);
+      var period = global.Reset.currentPeriod(c.ctx.cycle, at);
       var removed = 0;
       d.records = d.records.filter(function (r) {
-        var hit = r.taskId === taskId && (r.folderId == null ? null : r.folderId) === fid && global.Reset.inPeriod(r.doneAt, period);
+        var hit = r.taskId === taskId && (r.folderId == null ? null : r.folderId) === c.fid && global.Reset.inPeriod(r.doneAt, period);
         if (hit) removed++;
         return !hit;
       });
@@ -1070,7 +1075,7 @@
       var folders = 0, records = 0, groupRecords = 0;
       scopeFolders(ctx, folderId).forEach(function (f) {
         var e = evalFolder(d, ctx, f.id, at);
-        if (e.off || e.empty || e.done) return;
+        if (e.empty || e.done) return;
         folders++;
         if (ctx.group.required != null) {
           d.groupRecords.push({ groupId: groupId, folderId: f.id, doneAt: doneAt });
@@ -1097,7 +1102,7 @@
       var records = 0;
       scopeFolders(ctx, null).forEach(function (f) {
         var e = evalFolder(d, ctx, f.id, at);
-        if (e.off || e.empty) return;
+        if (e.empty) return;
         e.tasks.forEach(function (s) {
           if (s.taskId !== taskId || s.state !== 'todo') return;
           d.records.push({ taskId: taskId, folderId: f.id, doneAt: doneAt });
