@@ -1736,6 +1736,165 @@
       }, [-1, true]);
     });
 
+    /* ---------- 6단계: 기록 (Reset.buildHistory, listHistoryPeriods) ---------- */
+    function bh(d, at, limit, limits) { return R.buildHistory({ games: d.games, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at || NOON, limit: limit, limits: limits }); }
+    function hsec(h, key) { return h.games[0].sections.filter(function (s) { return s.key === key; })[0]; }
+    // 구획 key, 묶음 id, 숙제 id로 숙제 항목을 찾는다
+    function hte(h, key, gid, tid) {
+      var s = hsec(h, key); if (!s) return null;
+      var g = s.groups.filter(function (x) { return x.group.id === gid; })[0]; if (!g) return null;
+      return g.tasks.filter(function (t) { return t.task.id === tid; })[0] || null;
+    }
+    function sts(te) { return te.rows.map(function (r) { return r.status; }); }
+    function rowsInclude(te, t) { return te.rows.filter(function (r) { return r.period.start.getTime() <= t.getTime() && (!r.period.end || t.getTime() < r.period.end.getTime()); }).length; }
+    function contiguous(te) { // 최신순 목록에서 각 줄의 끝 = 바로 앞(더 최근) 줄의 시작: 빈틈도 겹침도 없다
+      for (var i = 1; i < te.rows.length; i++) if (te.rows[i].period.end.getTime() !== te.rows[i - 1].period.start.getTime()) return false;
+      return true;
+    }
+    function withTask(d, id, props) { d.tasks.forEach(function (t) { if (t.id === id) Object.keys(props).forEach(function (k) { t[k] = props[k]; }); }); return d; }
+    function iso(m, day, h, mi) { return R.formatIso(D(m, day, h, mi)); }
+
+    suite('기록 (Reset.buildHistory)', function () {
+      var base = bh(board());
+      eq('구획 순서: 게임 공통이 먼저, 이어서 폴더 트리 순서(위 단계부터)', function () { return base.games[0].sections.map(function (s) { return s.pathText; }); }, ['공통', '본계정', '본계정 › 캐릭터1', '본계정 › 캐릭터2', '부계정', '부계정 › 캐릭터3']);
+      eq('구획 안의 묶음: 공통은 게임 공통 묶음만, 계정은 계정 범위 묶음, 캐릭터는 캐릭터 범위 묶음(설정 순서)', function () {
+        return ['game', 'fa1', 'fc1'].map(function (k) { return hsec(base, k).groups.map(function (g) { return g.group.id; }); });
+      }, [['gr3', 'gr5'], ['gr4'], ['gr1', 'gr2']]);
+      eq('끈 숙제는 뺀다: 본계정이 끈 tk4는 캐릭터1에서 빠지고 부계정 캐릭터3에는 있다', function () {
+        return [hsec(base, 'fc1').groups[1].tasks.map(function (t) { return t.task.id; }), hsec(base, 'fc3').groups[1].tasks.map(function (t) { return t.task.id; })];
+      }, [['tk3', 'tk6'], ['tk3', 'tk4', 'tk6']]);
+      eq('끈 묶음은 그 폴더 구획에서 빠진다 (본계정이 일일 퀘스트를 끔)', function () { var d = board(); d.games[0].folders[0].off = ['gr1']; return hsec(bh(d), 'fc1').groups.map(function (g) { return g.group.id; }); }, ['gr2']);
+      eq('숙제를 전부 끈 폴더는 그 묶음이 빠지고, 모든 묶음이 빠지면 구획도 없다', function () {
+        var d = board(); d.games[0].folders[1].off = ['tk1', 'tk2', 'tk3', 'tk6']; var h = bh(d); return [hsec(h, 'fc1') === undefined, hsec(h, 'fc2') !== undefined];
+      }, [true, true]);
+      eq('기본 10개: 숙제를 만든 기간(9/30 05:00~)부터 지금까지 16기간 중 10개만, 더 있음, 잘림 아님', function () {
+        var t = hte(base, 'fc1', 'gr1', 'tk1'); return [t.shown, t.total, t.more, t.truncated, t.rows[0].period.isCurrent, t.rows[1].period.isCurrent];
+      }, [10, 16, true, false, true, false]);
+      eq('limit을 늘리면 끝까지: 100이면 16개, 더 없음', function () { var t = hte(bh(board(), NOON, 100), 'fc1', 'gr1', 'tk1'); return [t.shown, t.more, t.rows[15].period.start.getTime() === D(9, 30, 5, 0).getTime()]; }, [16, false, true]);
+      eq('limits(숙제/폴더별): 지정한 곳만 늘어난다', function () {
+        var h = bh(board(), NOON, undefined, { 'tk1/fc1': 15 }); return [hte(h, 'fc1', 'gr1', 'tk1').shown, hte(h, 'fc1', 'gr1', 'tk2').shown];
+      }, [15, 10]);
+      eq('기간 경계: 지난 기간의 시작·끝이 05:00이고 이어진다 (빈틈도 겹침도 없다)', function () {
+        var t = hte(base, 'fc1', 'gr1', 'tk1'); return [t.rows[1].period.start.getTime() === D(10, 14, 5, 0).getTime(), t.rows[1].period.end.getTime() === D(10, 15, 5, 0).getTime(), contiguous(t)];
+      }, [true, true, true]);
+      eq('기록이 없으면 이번 기간은 pending(놓침 아님), 지난 기간은 모두 missed', function () { var t = hte(base, 'fc1', 'gr1', 'tk1'); return [sts(t)[0], sts(t).slice(1).every(function (s) { return s === 'missed'; }), t.missed]; }, ['pending', true, 9]);
+      eq('이번 기간 기록은 done과 완료 시각', function () { var t = hte(bh(withRecs(board(), [rc('tk1', 'fc1', TODAY)])), 'fc1', 'gr1', 'tk1'); return [t.rows[0].status, t.rows[0].doneAt && R.formatIso(t.rows[0].doneAt)]; }, ['done', '2026-10-15T06:30:00']);
+      eq('어제 21:00 기록은 어제 줄이 done, 그 밖의 지난 줄은 missed, 놓침은 8개 (이번 기간 pending 제외)', function () {
+        var t = hte(bh(withRecs(board(), [rc('tk1', 'fc1', D(10, 14, 21, 0))])), 'fc1', 'gr1', 'tk1'); return [sts(t).slice(0, 3), t.missed];
+      }, [['pending', 'done', 'missed'], 8]);
+      eq('폴더마다 따로: 캐릭터1만 했으면 캐릭터2는 같은 기간이 missed', function () {
+        var h = bh(withRecs(board(), [rc('tk1', 'fc1', D(10, 14, 21, 0))])); return [sts(hte(h, 'fc1', 'gr1', 'tk1'))[1], sts(hte(h, 'fc2', 'gr1', 'tk1'))[1]];
+      }, ['done', 'missed']);
+      eq('다른 숙제의 기록은 섞이지 않는다', function () { var h = bh(withRecs(board(), [rc('tk2', 'fc1', D(10, 14, 21, 0))])); return sts(hte(h, 'fc1', 'gr1', 'tk1'))[1]; }, 'missed');
+      eq('숙제를 만들기 전 기간은 빠진다: 10/13 08:00에 만들면 10/13 05:00~ 기간부터 3줄', function () {
+        var t = hte(bh(withTask(board(), 'tk1', { createdAt: iso(10, 13, 8, 0) })), 'fc1', 'gr1', 'tk1'); return [t.shown, t.total, t.rows[2].period.start.getTime() === D(10, 13, 5, 0).getTime()];
+      }, [3, 3, true]);
+      eq('만든 시각이 기간 끝과 같으면 그 기간은 빠지고(경계), 1분 전이면 들어간다', function () {
+        var a = hte(bh(withTask(board(), 'tk1', { createdAt: iso(10, 14, 5, 0) })), 'fc1', 'gr1', 'tk1');
+        var b = hte(bh(withTask(board(), 'tk1', { createdAt: iso(10, 14, 4, 59) })), 'fc1', 'gr1', 'tk1'); return [a.shown, b.shown];
+      }, [2, 3]);
+      eq('같은 묶음의 숙제마다 만든 시각이 달라도 각자 자기 기간부터 센다', function () {
+        var h = bh(withTask(board(), 'tk2', { createdAt: iso(10, 14, 8, 0) })); return [hte(h, 'fc1', 'gr1', 'tk1').total, hte(h, 'fc1', 'gr1', 'tk2').total];
+      }, [16, 2]);
+      eq('숙제를 만들기 전이면(?now로 과거) 그 숙제는 줄이 없다', function () { var t = hte(bh(board(), D(9, 20, 12, 0)), 'fc1', 'gr1', 'tk1'); return [t === null ? 'none' : t.shown]; }, [0]);
+      eq('묶음 달성: 주간 필요 개수 2를 채운 기간의 안 한 숙제는 missed-group-met, 한 숙제는 done', function () {
+        var h = bh(withRecs(board(), [rc('tk3', 'fc3', D(10, 10, 12, 0)), rc('tk4', 'fc3', D(10, 10, 13, 0))]));
+        return [sts(hte(h, 'fc3', 'gr2', 'tk3'))[1], sts(hte(h, 'fc3', 'gr2', 'tk6'))[1], hte(h, 'fc3', 'gr2', 'tk6').missed];
+      }, ['done', 'missed-group-met', 2]);
+      eq('묶음 체크로 완료: 묶음 완료 기록이 있는 기간은 숙제마다 group-checked (놓침 아님)', function () {
+        var h = bh(withRecs(board(), [], [grc('gr2', 'fc1', D(10, 10, 12, 0))])); return [sts(hte(h, 'fc1', 'gr2', 'tk3'))[1], sts(hte(h, 'fc1', 'gr2', 'tk6'))[1]];
+      }, ['group-checked', 'group-checked']);
+      eq('이번 기간 묶음 달성: 안 한 숙제는 pending-group-met', function () {
+        var h = bh(withRecs(board(), [rc('tk3', 'fc3', TODAY), rc('tk4', 'fc3', TODAY)])); return sts(hte(h, 'fc3', 'gr2', 'tk6'))[0];
+      }, 'pending-group-met');
+      eq('1회 주기: 한 줄(시작·끝 없음), 기록이 없으면 pending, 있으면 done', function () {
+        var a = hte(bh(board()), 'game', 'gr5', 'tk8'), b = hte(bh(withRecs(board(), [rc('tk8', null, TODAY)])), 'game', 'gr5', 'tk8');
+        return [a.shown, a.rows[0].period.start, a.rows[0].period.end, a.rows[0].status, b.rows[0].status, a.more];
+      }, [1, null, null, 'pending', 'done', false]);
+      eq('리셋 경계: 05:00 기록은 04:59에는 이전 줄에 없고 05:00에는 이번 줄이다 (10/15 06:30 기록: 10/16 04:59는 이번 줄 done, 05:00에는 어제 줄 done과 이번 줄 pending)', function () {
+        var d = withRecs(board(), [rc('tk1', 'fc1', TODAY)]);
+        var a = hte(bh(d, D(10, 16, 4, 59)), 'fc1', 'gr1', 'tk1'), b = hte(bh(d, D(10, 16, 5, 0)), 'fc1', 'gr1', 'tk1');
+        return [sts(a).slice(0, 2), sts(b).slice(0, 2)];
+      }, [['done', 'missed'], ['pending', 'done']]);
+      eq('남은 시간 목록: 일일·주간 묶음의 남은 ms가 들어가고 1회는 빠진다', function () { return base.remainingMs.length > 0 && base.remainingMs.every(function (ms) { return typeof ms === 'number' && ms > 0; }); }, true);
+      eq('게임 0개, 묶음 0개, 숙제 0개', function () {
+        var d1 = board(); d1.games = [];
+        var d2 = board(); d2.groups = []; d2.tasks = [];
+        var d3 = board(); d3.tasks = [];
+        var h3 = bh(d3);
+        return [bh(d1).games, bh(d2).games[0].sections, h3.games[0].sections.length > 0 ? h3.games[0].sections[0].groups.every(function (g) { return g.tasks.length === 0; }) : 'x'];
+      }, [[], [], true]);
+      eq('폴더가 없는 단계 범위 묶음은 noFolderGroups에 담긴다', function () { var d = board(); d.games[0].folders = []; var g = bh(d).games[0]; return [g.noFolderGroups.map(function (x) { return x.id; }), g.sections.map(function (s) { return s.key; })]; }, [['gr1', 'gr2', 'gr4'], ['game']]);
+      eq('받은 데이터를 바꾸지 않는다', function () { var d = withRecs(board(), [rc('tk1', 'fc1', TODAY)]); var s = JSON.stringify(d); bh(d); return s === JSON.stringify(d); }, true);
+      eq('분 단위 주기(1000개 상한): 보여 주는 것은 limit만큼, total 1000, 잘림 truncated, limit을 크게 해도 1000까지', function () {
+        var d = board(); d.games[0].cycles.push({ id: 'cm', name: '1분', type: 'interval', anchor: '2026-10-01T00:00', every: { minutes: 1 } });
+        d.groups.push({ id: 'gm', gameId: 'gm1', name: '분', cycleId: 'cm', scope: 'game', required: null, low: false });
+        d.tasks.push({ id: 'tm', groupId: 'gm', name: 'tm', low: false, createdAt: '2026-10-01T00:00:00' });
+        var a = hte(bh(d), 'game', 'gm', 'tm'), b = hte(bh(d, NOON, 5000), 'game', 'gm', 'tm');
+        return [a.shown, a.total, a.truncated, a.more, b.shown, b.more];
+      }, [10, 1000, true, true, 1000, false]);
+    });
+
+    suite('기록 기간 (Reset.listHistoryPeriods) — 주기를 바꾼 직후(carry)', function () {
+      function daily(carry) { var c = { id: 'cd', name: '일일', type: 'daily', time: '05:00' }; if (carry) c.carry = carry; return c; }
+      function withCycle(carry) { var d = board(); d.games[0].cycles[0] = daily(carry); return d; }
+      var SINCE_LATE = { since: iso(10, 15, 9, 0), until: iso(10, 16, 5, 0) };   // 지금 기간(10/15 05:00~)이 시작된 뒤에 바꿈 → 새 기간 시작이 늦다
+      var SINCE_EARLY = { since: iso(10, 14, 20, 0), until: iso(10, 16, 5, 0) }; // 지난 기간 안에서 바꿈 → 새 기간 시작이 이르다
+      var times = [D(10, 1, 3, 0), D(10, 10, 12, 0), D(10, 14, 4, 59), D(10, 14, 5, 0), D(10, 14, 10, 0), D(10, 14, 20, 0), D(10, 14, 23, 0), D(10, 15, 4, 59), D(10, 15, 5, 0), D(10, 15, 8, 59), D(10, 15, 9, 0), D(10, 15, 11, 59)];
+      var from = D(10, 1, 0, 0);
+
+      eq('carry가 없으면 listPeriods와 같다 (지금 기간 + 지난 기간)', function () {
+        var c = daily(null), a = R.listHistoryPeriods(c, '2026-10-01T00:00:00', NOON), b = R.listPeriods(c, '2026-10-01T00:00:00', NOON);
+        return [a.periods.length, a.truncated, a.periods.every(function (p, i) { return p.start.getTime() === b.periods[i].start.getTime() && p.end.getTime() === b.periods[i].end.getTime() && p.isCurrent === b.periods[i].isCurrent; })];
+      }, [16, false, true]);
+      eq('since가 만든 시각 뒤이면(?now 과거) 빈 목록', function () { return R.listHistoryPeriods(daily(null), '2026-10-20T00:00:00', NOON); }, { periods: [], truncated: false });
+      eq('빈틈 경우(since가 새 주기 마지막 리셋보다 늦음): 지금 기간은 since부터, 05:00~09:00 줄이 빈틈을 메운다', function () {
+        var l = R.listHistoryPeriods(daily(SINCE_LATE), '2026-10-01T00:00:00', NOON).periods;
+        return [l[0].start.getTime() === D(10, 15, 9, 0).getTime(), l[1].start.getTime() === D(10, 15, 5, 0).getTime(), l[1].end.getTime() === D(10, 15, 9, 0).getTime(), l[2].start.getTime() === D(10, 14, 5, 0).getTime(), l.length];
+      }, [true, true, true, true, 17]);
+      eq('겹침 경우(since가 더 이름): 지금 기간은 since부터, 그 안에 들어가는 줄은 빠지고 걸친 줄은 since까지로 잘린다', function () {
+        var l = R.listHistoryPeriods(daily(SINCE_EARLY), '2026-10-01T00:00:00', NOON).periods;
+        return [l[0].start.getTime() === D(10, 14, 20, 0).getTime(), l[1].start.getTime() === D(10, 14, 5, 0).getTime(), l[1].end.getTime() === D(10, 14, 20, 0).getTime(), l.length];
+      }, [true, true, true, 16]);
+      eq('두 경우 모두 줄이 이어진다 (각 줄의 끝 = 더 최근 줄의 시작)', function () {
+        return [SINCE_LATE, SINCE_EARLY].map(function (cr) {
+          var l = R.listHistoryPeriods(daily(cr), '2026-10-01T00:00:00', NOON).periods;
+          for (var i = 1; i < l.length; i++) if (l[i].end.getTime() !== l[i - 1].start.getTime()) return false;
+          return true;
+        });
+      }, [true, true]);
+      [['빈틈', SINCE_LATE], ['겹침', SINCE_EARLY]].forEach(function (pair) {
+        eq('buildHistory(' + pair[0] + '): 만든 이후의 모든 완료 기록이 정확히 한 줄에 들어간다', function () {
+          var t = hte(bh(withRecs(withCycle(pair[1]), []), NOON, 100), 'fc1', 'gr1', 'tk1');
+          return times.map(function (x) { return x.getTime() >= from.getTime() ? rowsInclude(t, x) : 1; });
+        }, times.map(function () { return 1; }));
+        eq('buildHistory(' + pair[0] + '): 이번 기간 줄의 판정은 메인 화면(evaluateGame)과 같다 — 기록 시각마다 비교', function () {
+          return times.map(function (x) {
+            if (x.getTime() < from.getTime()) return true;
+            var d = withRecs(withCycle(pair[1]), [rc('tk1', 'fc1', x)]);
+            var cur = hte(bh(d, NOON, 100), 'fc1', 'gr1', 'tk1').rows[0].status;
+            var node = gp(eg(d), 'gr1').byId.fc1.ev.tasks[0].state;
+            return (cur === 'done') === (node === 'done');
+          });
+        }, times.map(function () { return true; }));
+      });
+      eq('빈틈 경우 기록 위치: 10/15 07:00 기록은 05:00~09:00 줄(done), 이번 줄(09:00~)은 pending', function () {
+        var t = hte(bh(withRecs(withCycle(SINCE_LATE), [rc('tk1', 'fc1', D(10, 15, 7, 0))]), NOON, 100), 'fc1', 'gr1', 'tk1'); return sts(t).slice(0, 3);
+      }, ['pending', 'done', 'missed']);
+      eq('겹침 경우 기록 위치: 10/15 03:00 기록은 이번 줄(10/14 20:00~)이고 10/14 10:00 기록은 잘린 줄', function () {
+        var a = hte(bh(withRecs(withCycle(SINCE_EARLY), [rc('tk1', 'fc1', D(10, 15, 3, 0))]), NOON, 100), 'fc1', 'gr1', 'tk1');
+        var b = hte(bh(withRecs(withCycle(SINCE_EARLY), [rc('tk1', 'fc1', D(10, 14, 10, 0))]), NOON, 100), 'fc1', 'gr1', 'tk1');
+        return [sts(a).slice(0, 2), sts(b).slice(0, 2)];
+      }, [['done', 'missed'], ['pending', 'done']]);
+      eq('1회로 바꾼 carry({since}): 한 줄이고 since 이전 기록은 이번 줄이 아니다 (메인 화면과 같다)', function () {
+        var d = board(); d.games[0].cycles[2] = { id: 'co', name: '1회', type: 'once', carry: { since: iso(10, 15, 8, 0) } };
+        var before = hte(bh(withRecs(d, [rc('tk8', null, D(10, 15, 7, 0))])), 'game', 'gr5', 'tk8');
+        var after = hte(bh(withRecs(d, [rc('tk8', null, D(10, 15, 9, 0))])), 'game', 'gr5', 'tk8');
+        var main = gp(eg(withRecs(d, [rc('tk8', null, D(10, 15, 7, 0))])), 'gr5').ev.tasks[0].state;
+        return [before.shown, before.rows[0].period.start.getTime() === D(10, 15, 8, 0).getTime(), before.rows[0].status, main, after.rows[0].status];
+      }, [1, true, 'pending', 'todo', 'done']);
+    });
+
     suite('체크 저장 (checkTask, uncheckTask)', function () {
       var AT = D(10, 15, 12, 0);
       eq('칸 체크: 완료 기록 하나(doneAt 문자열)가 쌓이고 검증을 통과한다', function () {

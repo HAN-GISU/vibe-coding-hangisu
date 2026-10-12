@@ -407,15 +407,180 @@
   // status: 'done'(함) | 'missed'(안함) | 'missed-group-met'(안함, 묶음 달성) | 'group-checked'(묶음 체크로 완료)
   //         | 'off'(그 폴더가 끈 숙제) | 'none'(그 기간에는 아직 없던 숙제)
   function periodStatus(args) {
-    var ev = evaluateGroup(args);
+    return statusOfTask(evaluateGroup(args), args.task.id);
+  }
+
+  // evaluateGroup 결과(ev) 하나에서 숙제 하나의 결과를 꺼낸다 (periodStatus와 기록 화면이 같은 규칙을 쓴다).
+  function statusOfTask(ev, taskId) {
     if (ev.off) return { status: 'off', doneAt: null };
     var s = null;
-    ev.tasks.forEach(function (x) { if (x.taskId === args.task.id) s = x; });
+    ev.tasks.forEach(function (x) { if (x.taskId === taskId) s = x; });
     if (!s) return { status: 'none', doneAt: null };
     if (s.state === 'off') return { status: 'off', doneAt: null };
     if (s.state === 'done') return { status: 'done', doneAt: s.doneAt };
     if (ev.byGroupRecord) return { status: 'group-checked', doneAt: null };
     return { status: ev.done ? 'missed-group-met' : 'missed', doneAt: null };
+  }
+
+  /* ---------- 기록 화면 ---------- */
+
+  // 기록 화면용 기간 목록(최신순). listPeriods(주기 자체의 경계)에 carry를 맞춘다.
+  // 맨 앞은 지금 기간 currentPeriod(at)로, 메인 화면 판정과 같은 기간이다.
+  // 지난 기간은 listPeriods의 기간 중 지금 기간 시작보다 앞선 부분만 쓴다: 지금 기간 시작에 걸친 기간은 그 시작까지로 자르고
+  // (빈틈 없음), 지금 기간 안에 들어가는 기간은 뺀다(겹침 없음). 그래서 만든 이후의 모든 시각이 정확히 한 기간에 속한다.
+  // since는 숙제를 만든 시각. 돌려주는 값: { periods: [{start, end, isCurrent}], truncated }
+  function listHistoryPeriods(c, since, at) {
+    var base = listPeriods(c, since, at);
+    if (!base.periods.length) return { periods: [], truncated: false };
+    var cur = currentPeriod(c, at);
+    var list = [{ start: cur.start, end: cur.end, isCurrent: true }];
+    if (c.type === 'once') return { periods: list, truncated: false };
+    var cStart = cur.start.getTime();
+    base.periods.forEach(function (p) {
+      if (p.end.getTime() <= cStart) list.push({ start: p.start, end: p.end, isCurrent: false });
+      else if (p.start.getTime() < cStart) list.push({ start: p.start, end: cur.start, isCurrent: false });
+    });
+    return { periods: list, truncated: base.truncated };
+  }
+
+  var DEFAULT_HISTORY_LIMIT = 10;
+
+  // 기록 화면의 내용 전체를 만든다. 판정은 evaluateGroup/statusOfTask를 쓰고, 여기서는 기간과 묶기만 한다.
+  // args: { games, groups, tasks, records, groupRecords, at, limit?(숙제마다 보여 줄 기간 수, 기본 10), limits?({ "숙제id/폴더id": 개수 }) }
+  // 돌려주는 값: { games: [{ game, noFolderGroups, sections }], remainingMs }
+  //   sections: [{ key, common, pathText, groups: [{ group, cycle, tasks: [{ key, task, rows, total, shown, more, truncated, missed }] }] }]
+  //     게임 공통 구획이 먼저, 이어서 폴더 트리 순서(위 단계부터). 폴더가 끈 묶음·숙제는 넣지 않는다 (현재 설정 기준).
+  //   rows: 최신순 [{ period: {start, end, isCurrent}, status, doneAt }]
+  //     status: 'done' | 'missed' | 'missed-group-met' | 'group-checked' | 'pending'(이번 기간, 아직 안 함) | 'pending-group-met'(이번 기간, 묶음 달성)
+  //   total: 만든 이후의 기간 수(상한 안에서), shown: rows.length, more: 더 보여 줄 기간이 있는지, truncated: 상한 때문에 더 오래된 기간이 잘렸는지
+  //   missed: rows 안의 'missed' 개수 (보여 준 범위 안에서만 센다)
+  function buildHistory(args) {
+    var at = args.at;
+    var records = args.records || [];
+    var groupRecords = args.groupRecords || [];
+    var baseLimit = args.limit > 0 ? args.limit : DEFAULT_HISTORY_LIMIT;
+    var limits = args.limits || {};
+    var remainingList = [];
+
+    var games = (args.games || []).map(function (game) {
+      var cycleById = Object.create(null);
+      game.cycles.forEach(function (c) { cycleById[c.id] = c; });
+
+      // 폴더를 트리 순서(위 단계부터)로
+      var kids = Object.create(null);
+      game.folders.forEach(function (f) {
+        var k = f.parentId == null ? '' : f.parentId;
+        (kids[k] = kids[k] || []).push(f);
+      });
+      var ordered = [];
+      (function walk(key, path) {
+        (kids[key] || []).forEach(function (f) {
+          var p = path.concat([f.name]);
+          ordered.push({ folder: f, path: p });
+          walk(f.id, p);
+        });
+      })('', []);
+
+      // 묶음마다 한 번만 계산하는 것: 기간 목록, 기록 거르기, 폴더·기간별 판정
+      var gstate = Object.create(null);
+      function stateOf(group) {
+        if (gstate[group.id]) return gstate[group.id];
+        var cycle = cycleById[group.cycleId];
+        var tasks = args.tasks.filter(function (t) { return t.groupId === group.id; });
+        var ids = Object.create(null);
+        var earliest = null;
+        tasks.forEach(function (t) {
+          ids[t.id] = true;
+          var created = parseTime(t.createdAt);
+          if (created && (earliest === null || created.getTime() < earliest.getTime())) earliest = created;
+        });
+        var st = {
+          group: group, cycle: cycle, tasks: tasks, evs: Object.create(null),
+          records: records.filter(function (r) { return ids[r.taskId]; }),
+          groupRecords: groupRecords.filter(function (r) { return r.groupId === group.id; }),
+          periods: null
+        };
+        if (cycle && tasks.length) {
+          var rem = remainingMs(cycle, at);
+          if (rem !== null) remainingList.push(rem);
+          st.periods = listHistoryPeriods(cycle, earliest || at, at);
+        }
+        gstate[group.id] = st;
+        return st;
+      }
+
+      function evAt(st, folderId, i) {
+        var key = (folderId || '') + '|' + i;
+        if (!st.evs[key]) {
+          var p = st.periods.periods[i];
+          st.evs[key] = evaluateGroup({ group: st.group, cycle: st.cycle, tasks: st.tasks, folders: game.folders, folderId: folderId,
+            records: st.records, groupRecords: st.groupRecords, at: at, period: { start: p.start, end: p.end } });
+        }
+        return st.evs[key];
+      }
+
+      function taskEntries(st, folderId) {
+        if (!st.periods) return [];
+        var out = [];
+        st.tasks.forEach(function (t) {
+          if (folderId !== null && isOff(game.folders, folderId, t.id)) return;
+          var created = parseTime(t.createdAt);
+          var all = st.periods.periods;
+          var n = 0; // 이 숙제가 있던 기간 수 (최신순 목록의 앞쪽 n개)
+          while (n < all.length && (!created || !all[n].end || created < all[n].end)) n++;
+          var key = t.id + '/' + (folderId || '');
+          var want = limits[key] > 0 ? limits[key] : baseLimit;
+          var rows = [];
+          for (var i = 0; i < n && rows.length < want; i++) {
+            var s = statusOfTask(evAt(st, folderId, i), t.id);
+            if (s.status === 'off' || s.status === 'none') continue;
+            var status = s.status;
+            if (all[i].isCurrent) {
+              if (status === 'missed') status = 'pending';
+              else if (status === 'missed-group-met') status = 'pending-group-met';
+            }
+            rows.push({ period: { start: all[i].start, end: all[i].end, isCurrent: all[i].isCurrent }, status: status, doneAt: s.doneAt });
+          }
+          var missed = 0;
+          rows.forEach(function (r) { if (r.status === 'missed') missed++; });
+          out.push({ key: key, task: t, rows: rows, total: n, shown: rows.length, more: i < n,
+            truncated: st.periods.truncated && n === all.length, missed: missed });
+        });
+        return out;
+      }
+
+      var sections = [];
+      var common = [];
+      args.groups.forEach(function (g) {
+        if (g.gameId !== game.id || g.scope !== 'game') return;
+        var st = stateOf(g);
+        common.push({ group: g, cycle: st.cycle, tasks: taskEntries(st, null) });
+      });
+      if (common.length) sections.push({ key: 'game', common: true, pathText: '공통', groups: common });
+
+      var levelsWithFolders = Object.create(null);
+      ordered.forEach(function (o) {
+        var f = o.folder;
+        levelsWithFolders[f.level] = true;
+        var gs = [];
+        args.groups.forEach(function (g) {
+          if (g.gameId !== game.id || g.scope !== f.level) return;
+          if (isOff(game.folders, f.id, g.id)) return;
+          var st = stateOf(g);
+          var tasks = taskEntries(st, f.id);
+          if (!tasks.length) return; // 숙제가 없거나 전부 끈 폴더
+          gs.push({ group: g, cycle: st.cycle, tasks: tasks });
+        });
+        if (gs.length) sections.push({ key: f.id, common: false, pathText: o.path.join(' › '), groups: gs });
+      });
+
+      var noFolderGroups = args.groups.filter(function (g) {
+        return g.gameId === game.id && g.scope !== 'game' && !levelsWithFolders[g.scope];
+      });
+      return { game: game, noFolderGroups: noFolderGroups, sections: sections };
+    });
+
+    return { games: games, remainingMs: remainingList };
   }
 
   /* ---------- 게임 목록 판정 (메인 화면) ---------- */
@@ -710,6 +875,9 @@
     evaluateGroup: evaluateGroup,
     evaluateGame: evaluateGame,
     periodStatus: periodStatus,
+    statusOfTask: statusOfTask,
+    listHistoryPeriods: listHistoryPeriods,
+    buildHistory: buildHistory,
     remainingMs: remainingMs,
     formatRemaining: formatRemaining,
     formatUntilReset: formatUntilReset,
