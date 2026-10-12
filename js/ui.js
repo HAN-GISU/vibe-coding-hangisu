@@ -298,8 +298,16 @@
     });
   }
 
+  // 다른 화면으로 가는 링크. 메뉴처럼 누르기 직전에 테스트 시각(?now=)을 다시 계산해서 붙인다.
+  function navLink(text, href, className) {
+    var a = el('a', { href: href + global.Reset.nowQuery(), class: className || null, text: text });
+    function refresh() { a.setAttribute('href', href + global.Reset.nowQuery()); }
+    ['pointerdown', 'mouseenter', 'focus', 'click'].forEach(function (ev) { a.addEventListener(ev, refresh); });
+    return a;
+  }
+
   global.UI = {
-    el: el, field: field, nextId: nextId,
+    el: el, field: field, nextId: nextId, navLink: navLink,
     modal: modal, confirm: confirmDialog, info: info, sheet: sheet, isDialogOpen: isDialogOpen, whenDialogsClosed: whenDialogsClosed,
     notice: notice, download: download,
     mountChrome: mountChrome, refreshStorageBanner: refreshStorageBanner, clockText: clockText
