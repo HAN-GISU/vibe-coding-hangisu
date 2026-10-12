@@ -757,6 +757,8 @@
       oneErr('숙제의 묶음이 없음', function () { var d = sample(); d.tasks[0].groupId = 'nope'; return d; }, '묶음이 없어요');
       oneErr('숙제 만든 시각을 읽을 수 없음', function () { var d = sample(); d.tasks[0].createdAt = '어제'; return d; }, '만든 시각');
       oneErr('숙제 id 중복', function () { var d = sample(); d.tasks[1].id = 'tk1'; return d; }, '겹쳐');
+      oneErr('숙제 id가 묶음 id와 같음 (끄기가 종류를 구분하지 못한다)', function () { var d = sample(); d.tasks[0].id = 'gr1'; return d; }, '묶음 id와 겹쳐요');
+      oneErr('내 프리셋 안에서 숙제 id가 묶음 id와 같음', function () { var d = sample(); d.presets[0].game.tasks[0].id = 'pg1'; d.presets[0].game.folders[0].off = ['pg1']; return d; }, '묶음 id와 겹쳐요');
       oneErr('완료 기록의 숙제가 없음', function () { var d = sample(); d.records[0].taskId = 'nope'; return d; }, '숙제가 없어요');
       oneErr('완료 기록의 폴더가 없음', function () { var d = sample(); d.records[0].folderId = 'nope'; return d; }, '폴더가 없어요');
       oneErr('완료 기록의 폴더가 다른 게임의 폴더', function () {
@@ -845,13 +847,17 @@
         var r = x.st.update(function () { throw new Error('boom'); });
         return [r.ok, x.fs.items[KEY] === raw, x.fs.setCalls];
       }, [false, true, 0]);
-      eq('스냅샷은 얼려 있어서 밖에서 고쳐도 저장소와 다음 스냅샷은 바뀌지 않는다', function () {
-        var x = storeWith(sample()); var snap = x.st.get(); var threw = false;
-        try { snap.games[0].name = '해킹'; snap.records.push({}); } catch (e) { threw = true; }
-        return [threw, Object.isFrozen(snap.games[0]), x.st.get().games[0].name, JSON.parse(x.fs.items[KEY]).games[0].name];
-      }, [true, true, '메이플스토리', '메이플스토리']);
-      eq('변경 함수에 주는 draft를 고쳐도(실패한 변경이라도) 스냅샷은 안 바뀐다', function () {
+      function throws(fn) { try { fn(); return false; } catch (e) { return true; } }
+      eq('스냅샷은 얼려 있어서 객체 필드를 밖에서 고쳐도(예외) 저장소와 다음 스냅샷이 바뀌지 않는다', function () {
         var x = storeWith(sample()); var snap = x.st.get();
+        return [throws(function () { snap.games[0].name = '해킹'; }), x.st.get().games[0].name, JSON.parse(x.fs.items[KEY]).games[0].name];
+      }, [true, '메이플스토리', '메이플스토리']);
+      eq('스냅샷은 얼려 있어서 배열을 밖에서 바꿔도(push, 대입, length) 예외가 나고 개수가 그대로다', function () {
+        var x = storeWith(sample()); var snap = x.st.get();
+        return [throws(function () { snap.records.push({}); }), throws(function () { snap.records[0] = null; }), throws(function () { snap.records.length = 0; }), x.st.get().records.length, JSON.parse(x.fs.items[KEY]).records.length];
+      }, [true, true, true, 1, 1]);
+      eq('변경 함수에 주는 draft를 고쳐도(실패한 변경이라도) 스냅샷은 안 바뀐다', function () {
+        var x = storeWith(sample());
         x.st.update(function (d) { d.games[0].name = '임시'; d.groups[1].required = 0; });
         return x.st.get().games[0].name;
       }, '메이플스토리');
@@ -945,7 +951,7 @@
       }, [1, 1]);
       eq('기간 삭제: 1회 주기의 기간({start:null,end:null})이면 그 숙제 기록 전부', function () {
         var x = withRecords();
-        return x.st.removeRecordsInPeriod({ taskIds: ['tk1'], folderIds: ['fc1'], period: { start: null, end: null } }).removed;
+        return x.st.removeRecordsInPeriod({ taskIds: ['tk1'], folderIds: ['fc1'], period: { once: true, start: null } }).removed;
       }, 4);
     });
 
@@ -1038,6 +1044,118 @@
           return [x.st.newId('x') !== first, x.st.newId('x').indexOf('x_') === 0];
         } finally { Math.random = origRandom; Date.now = origNow; }
       }, [true, true]);
+    });
+
+    suite('저장소 견고함 (2단계 리뷰 반영)', function () {
+      var BADID = { toString: null };
+      eq('이상한 id({"toString":null})가 저장돼 있어도 Store가 죽지 않고 손상으로 열리며 원문이 그대로다', function () {
+        var d = sample(); d.games[0].id = BADID; var raw = JSON.stringify(d);
+        var fs = fake(); fs.items[KEY] = raw; var st = ST.create(fs);
+        return [st.status().status, st.rawText() === raw, fs.items[KEY] === raw, fs.setCalls];
+      }, ['corrupted', true, true, 0]);
+      eq('다른 자리의 이상한 id(묶음의 gameId, 폴더 id, 숙제 id, 기록의 taskId, 끈 항목, 묶음 id)도 손상으로 본다', function () {
+        var vars = [
+          function (d) { d.groups[0].gameId = BADID; }, function (d) { d.games[0].folders[1].id = BADID; }, function (d) { d.tasks[0].id = BADID; },
+          function (d) { d.records[0].taskId = BADID; }, function (d) { d.games[0].folders[0].off = [BADID]; }, function (d) { d.groups[0].id = BADID; }
+        ];
+        return vars.map(function (f) { var d = sample(); f(d); var fs = fake(); fs.items[KEY] = JSON.stringify(d); return ST.create(fs).status().status; });
+      }, ['corrupted', 'corrupted', 'corrupted', 'corrupted', 'corrupted', 'corrupted']);
+      eq('validateData는 값을 읽다가 예외가 나도 던지지 않고 ok:false를 돌려준다', function () {
+        var d = sample(); Object.defineProperty(d.games[0], 'name', { enumerable: true, get: function () { throw new Error('읽기 실패'); } });
+        try { var r = ST.validateData(d); return [r.ok, typeof r.error, r.errors.length]; } catch (e) { return 'threw'; }
+      }, [false, 'string', 1]);
+
+      eq('update: 배열 칸을 delete하면 JSON에서 null이 되므로 거부하고, 저장소는 그대로이며 다시 읽어도 손상되지 않는다', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY];
+        var r = x.st.update(function (d) { delete d.records[0]; });
+        return [r.ok, x.fs.items[KEY] === raw, ST.create(x.fs).status().status];
+      }, [false, true, 'ok']);
+      eq('update: 배열 칸에 undefined를 넣어도 같다', function () { var x = storeWith(sample()); var raw = x.fs.items[KEY]; var r = x.st.update(function (d) { d.tasks[0] = undefined; }); return [r.ok, x.fs.items[KEY] === raw]; }, [false, true]);
+      eq('update: Date 객체를 넣으면 스냅샷에도 저장된 것과 같은 문자열이 들어가고, 나중에 그 Date를 바꿔도 스냅샷은 안 바뀐다', function () {
+        var x = storeWith(sample()); var when = new Date(2026, 9, 15, 6, 0, 0); var iso = when.toISOString();
+        var r = x.st.update(function (d) { d.tasks[0].createdAt = when; });
+        var snapValue = x.st.get().tasks[0].createdAt; when.setTime(0);
+        return [r.ok, typeof snapValue, snapValue === iso, x.st.get().tasks[0].createdAt === iso, JSON.parse(x.fs.items[KEY]).tasks[0].createdAt === iso];
+      }, [true, 'string', true, true, true]);
+
+      var P14 = { start: D(10, 14, 0, 0), end: D(10, 15, 0, 0) }; // 샘플의 10/14 기록이 들어 있는 기간
+      eq('기간 지우기: 기간 조건이 비었거나 모양이 틀리면 아무것도 지우지 않는다 ({}, start만, end만, 잘못된 Date, 문자열, 거꾸로, once인데 end가 있음, 객체가 아님)', function () {
+        var bads = [{}, { start: D(10, 14, 0, 0) }, { end: D(10, 15, 0, 0) }, { start: new Date('x'), end: D(10, 15, 0, 0) }, { start: '2026-10-14T00:00', end: '2026-10-15T00:00' },
+          { start: D(10, 15, 0, 0), end: D(10, 14, 0, 0) }, { once: true, end: D(10, 15, 0, 0) }, { once: true, start: 'x' }, null, undefined, 5];
+        return bads.map(function (p) {
+          var x = storeWith(sample()); var raw = x.fs.items[KEY];
+          var r = x.st.removeRecordsInPeriod({ taskIds: ['tk1'], groupId: 'gr2', folderIds: ['fc1', 'fc2'], period: p });
+          return [r.ok, x.fs.items[KEY] === raw, x.st.get().records.length];
+        });
+      }, [[false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1], [false, true, 1]]);
+      eq('기간 지우기: 숙제 선택이 문자열이면(tk10) 부분 문자열로 tk1 기록을 지우지 않는다', function () {
+        var x = storeWith(sample()); var r = x.st.removeRecordsInPeriod({ taskIds: 'tk10', folderIds: ['fc1'], period: P14 });
+        return [r.ok, x.st.get().records.length];
+      }, [false, 1]);
+      eq('기간 지우기: 폴더 선택이 문자열이면(fc10) 부분 문자열로 fc1 기록을 지우지 않는다', function () {
+        var x = storeWith(sample()); var r = x.st.removeRecordsInPeriod({ taskIds: ['tk1'], folderIds: 'fc10', period: P14 });
+        return [r.ok, x.st.get().records.length];
+      }, [false, 1]);
+      eq('기간 지우기: 선택에 문자열이 아닌 값이 섞였거나 숙제도 묶음도 정하지 않았거나 folderIds가 없으면 거부', function () {
+        var specs = [{ taskIds: ['tk1', 5], folderIds: ['fc1'], period: P14 }, { taskIds: [], folderIds: ['fc1'], period: P14 }, { taskIds: ['tk1'], period: P14 },
+          { taskIds: ['tk1'], folderIds: ['fc1', 7], period: P14 }, { taskIds: ['tk1'], groupId: 7, folderIds: ['fc1'], period: P14 }, null];
+        return specs.map(function (sp) { var x = storeWith(sample()); var r = x.st.removeRecordsInPeriod(sp); return [r.ok, x.st.get().records.length]; });
+      }, [[false, 1], [false, 1], [false, 1], [false, 1], [false, 1], [false, 1]]);
+      eq('기간 지우기: 1회 주기에서 시작 시각(carry)이 있으면 그 이후 기록만 지운다', function () {
+        var x = storeWith(sample());
+        x.st.addRecords([{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }]);
+        var r = x.st.removeRecordsInPeriod({ taskIds: ['tk1'], folderIds: ['fc1'], period: { once: true, start: D(10, 15, 5, 0) } });
+        return [r.ok, r.removed, x.st.get().records.map(function (q) { return q.doneAt; })];
+      }, [true, 1, ['2026-10-14T10:00:00']]);
+
+      eq('쓰기 직전 재읽기가 실패하면(저장소가 있는 모드) 오래된 메모리로 저장하지 않고 거부한다', function () {
+        var x = storeWith(sample()); x.fs.failGet = true;
+        var r = x.st.update(function (d) { d.games[0].name = '바뀜'; });
+        x.fs.failGet = false;
+        return [r.ok, r.error.indexOf('저장소를 읽지 못해서') >= 0, x.fs.setCalls, JSON.parse(x.fs.items[KEY]).games[0].name];
+      }, [false, true, 0, '메이플스토리']);
+      eq('같은 경우 가져오기도 거부한다', function () {
+        var x = storeWith(sample()); x.fs.failGet = true; var other = sample(); other.games[0].name = '다른';
+        var r = x.st.importJson(JSON.stringify(other)); x.fs.failGet = false;
+        return [r.ok, x.fs.setCalls, JSON.parse(x.fs.items[KEY]).games[0].name];
+      }, [false, 0, '메이플스토리']);
+      eq('처음부터 저장소가 없는 메모리 모드는 재읽기를 하지 않으니 계속 쓸 수 있다', function () { var st = ST.create(null); return [st.update(function () { return sample(); }).ok, st.get().games.length]; }, [true, 1]);
+
+      var BADREC = [
+        ['기록이 null', [null]], ['doneAt이 없음', [{ taskId: 'tk1', folderId: 'fc1' }]], ['taskId가 숫자', [{ taskId: 1, folderId: null, doneAt: '2026-10-15T06:00:00' }]],
+        ['folderId가 숫자', [{ taskId: 'tk1', folderId: 5, doneAt: '2026-10-15T06:00:00' }]], ['doneAt이 잘못된 Date', [{ taskId: 'tk1', folderId: 'fc1', doneAt: new Date('x') }]],
+        ['doneAt이 숫자', [{ taskId: 'tk1', folderId: 'fc1', doneAt: 12345 }]], ['목록이 문자열', 'tk1']
+      ];
+      BADREC.forEach(function (c) {
+        eq('addRecords 거부(예외 없이): ' + c[0], function () {
+          var x = storeWith(sample()); var raw = x.fs.items[KEY]; var r;
+          try { r = x.st.addRecords(c[1]); } catch (e) { return ['예외', e.message]; }
+          return [r.ok, r.error.indexOf('기록 형식') >= 0, x.fs.items[KEY] === raw, x.fs.setCalls];
+        }, [false, true, true, 0]);
+      });
+      eq('addRecords 거부(예외 없이): 묶음 기록이 undefined이거나 groupId 대신 taskId가 있음', function () {
+        return [[undefined], [{ taskId: 'tk1', folderId: null, doneAt: '2026-10-15T06:00:00' }]].map(function (g) {
+          var x = storeWith(sample()); var r;
+          try { r = x.st.addRecords([], g); } catch (e) { return '예외'; }
+          return [r.ok, x.st.get().groupRecords.length];
+        });
+      }, [[false, 1], [false, 1]]);
+
+      function bigRecords(n) { var a = []; for (var i = 0; i < n; i++) a.push({ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T06:00:00' }); return a; }
+      eq('저장(쓰기)에도 글자 수 상한이 있다: 상한을 넘는 변경은 거부하고 저장소는 그대로다', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY];
+        var r = x.st.addRecords(bigRecords(95000));
+        return [r.ok, r.error.indexOf('너무 커서') >= 0, x.fs.items[KEY] === raw, x.st.get().records.length];
+      }, [false, true, true, 1]);
+      eq('메모리 모드에서도 같은 상한이 적용된다', function () {
+        var st = ST.create(null); st.update(function () { return sample(); });
+        var r = st.addRecords(bigRecords(95000)); return [r.ok, st.get().records.length];
+      }, [false, 1]);
+      eq('상한 안에서 저장한 큰 데이터는 내보낸 파일이 가져오기 상한을 넘지 않아 항상 다시 가져올 수 있다', function () {
+        var x = storeWith(sample()); var r = x.st.addRecords(bigRecords(80000));
+        var out = x.st.exportJson().text; var y = ST.create(fake()); var im = y.importJson(out);
+        return [r.ok, out.length <= ST.LIMIT.text, im.ok, y.get().records.length];
+      }, [true, true, true, 80001]);
     });
 
     /* ---------- Store.ops (3단계 설정 화면의 변경 규칙) ---------- */

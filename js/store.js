@@ -34,8 +34,15 @@
   var MSG = {
     corrupted: '저장된 데이터가 손상돼 있어서 저장할 수 없어요. 손상된 원문을 내려받아 보관한 뒤 새로 시작해 주세요.',
     saveFail: '저장하지 못했어요. 저장 공간이 가득 찼을 수 있어요. 변경하지 않았어요. JSON으로 내보내 백업한 뒤 필요 없는 데이터를 지워 주세요.',
-    stashFail: '손상된 데이터를 보관하지 못했어요. 먼저 손상된 원문을 내려받아 주세요.'
+    stashFail: '손상된 데이터를 보관하지 못했어요. 먼저 손상된 원문을 내려받아 주세요.',
+    readFail: '저장소를 읽지 못해서 변경하지 않았어요. 잠시 뒤 다시 시도해 주세요.',
+    tooBig: '데이터가 너무 커서 저장할 수 없어요. 약 6MB까지 저장할 수 있어요. 필요 없는 게임이나 기록을 지워 주세요.',
+    badRecords: '기록 형식이 올바르지 않아요. 숙제(또는 묶음) id와 완료 시각이 필요해요.',
+    badRemove: '기록을 지우는 조건이 올바르지 않아요. 아무것도 지우지 않았어요.'
   };
+
+  // 저장(쓰기)할 수 있는 글자 수 상한. 내보낸 파일(저장한 글자 + 내보내기 메타)이 가져오기 상한(LIMIT.text)을 넘지 않게 여유를 둔다.
+  var WRITE_LIMIT = LIMIT.text - 1000;
 
   var DATA_KEYS = ['games', 'groups', 'tasks', 'records', 'groupRecords', 'presets'];
 
@@ -154,7 +161,17 @@
     });
   }
 
+  // 어떤 값이 와도 예외를 던지지 않고 { ok:false, error }로 돌려준다 (이상한 id 같은 값이 와도 Store가 죽지 않게).
   function validateData(data) {
+    try {
+      return validateDataCore(data);
+    } catch (e) {
+      var msg = '데이터 구조를 확인하지 못했어요. 값의 형식이 올바르지 않아요.';
+      return { ok: false, error: msg, errors: [msg] };
+    }
+  }
+
+  function validateDataCore(data) {
     var errs = makeErrs();
     function done() { return { ok: errs.list.length === 0, error: errs.list[0] || null, errors: errs.list }; }
 
@@ -208,13 +225,14 @@
       var label = '숙제 ' + (i + 1) + (isObj(t) && typeof t.name === 'string' ? ' "' + t.name + '"' : '');
       if (!isObj(t)) { errs.add(label + ': 올바르지 않아요.'); return; }
       var okId = checkIdUnique(t.id, taskById, label, errs);
+      if (okId && groupById[t.id]) { errs.add(label + ': id "' + t.id + '"가 묶음 id와 겹쳐요.'); okId = false; }
       if (!(typeof t.groupId === 'string' && groupGame[t.groupId])) { errs.add(label + ': 묶음이 없어요.'); return; }
       checkTaskFields(t, label, errs, true);
       if (okId) { taskGame[t.id] = groupGame[t.groupId]; validOff[groupGame[t.groupId]][t.id] = true; }
     });
 
     data.games.forEach(function (g, i) {
-      if (isObj(g) && validOff[g.id] && Array.isArray(g.folders)) checkOff(g.folders, validOff[g.id], '게임 ' + (i + 1), errs);
+      if (isObj(g) && typeof g.id === 'string' && validOff[g.id] && Array.isArray(g.folders)) checkOff(g.folders, validOff[g.id], '게임 ' + (i + 1), errs);
     });
 
     function checkFolderRef(r, gameOfItem, label) {
@@ -268,7 +286,10 @@
       else pg.tasks.forEach(function (t, j) {
         var tl = label + '의 숙제 ' + (j + 1);
         if (!isObj(t)) { errs.add(tl + ': 올바르지 않아요.'); return; }
-        if (checkIdUnique(t.id, ptasks, tl, errs)) ok[t.id] = true;
+        if (checkIdUnique(t.id, ptasks, tl, errs)) {
+          if (pgroups[t.id]) errs.add(tl + ': id "' + t.id + '"가 묶음 id와 겹쳐요.');
+          ok[t.id] = true;
+        }
         if (!(typeof t.groupId === 'string' && pgroups[t.groupId])) errs.add(tl + ': 묶음이 없어요.');
         checkTaskFields(t, tl, errs, false);
       });
@@ -280,7 +301,8 @@
 
   /* ---------- 정규화: 알려진 필드만 남긴다 ---------- */
 
-  function keep(src, allowed, ctx) {
+  // 알려진 필드(allowed)에 없는 필드가 몇 개인지 ctx.dropped에 더한다. (필드를 남기는 것이 아니라 버린 개수를 센다)
+  function countUnknownFields(src, allowed, ctx) {
     Object.keys(src).forEach(function (k) { if (allowed.indexOf(k) < 0) ctx.dropped++; });
   }
 
@@ -297,24 +319,24 @@
       allowed.push('anchor', 'every');
       out.anchor = c.anchor;
       out.every = { days: c.every.days || 0, hours: c.every.hours || 0, minutes: c.every.minutes || 0 };
-      keep(c.every, ['days', 'hours', 'minutes'], ctx);
+      countUnknownFields(c.every, ['days', 'hours', 'minutes'], ctx);
     }
     if (c.carry !== undefined) {
       out.carry = { since: c.carry.since };
       if (c.type !== 'once') out.carry.until = c.carry.until;
-      keep(c.carry, ['since', 'until'], ctx);
+      countUnknownFields(c.carry, ['since', 'until'], ctx);
     }
-    keep(c, allowed, ctx);
+    countUnknownFields(c, allowed, ctx);
     return out;
   }
 
   function normFolder(f, ctx) {
-    keep(f, ['id', 'parentId', 'level', 'name', 'off'], ctx);
+    countUnknownFields(f, ['id', 'parentId', 'level', 'name', 'off'], ctx);
     return { id: f.id, parentId: f.parentId == null ? null : f.parentId, level: f.level, name: f.name, off: f.off.slice() };
   }
 
   function normGroup(g, withGameId, ctx) {
-    keep(g, ['id', 'name', 'cycleId', 'scope', 'required', 'low'].concat(withGameId ? ['gameId'] : []), ctx);
+    countUnknownFields(g, ['id', 'name', 'cycleId', 'scope', 'required', 'low'].concat(withGameId ? ['gameId'] : []), ctx);
     var out = { id: g.id };
     if (withGameId) out.gameId = g.gameId;
     out.name = g.name; out.cycleId = g.cycleId; out.scope = g.scope;
@@ -324,7 +346,7 @@
   }
 
   function normTask(t, withCreatedAt, ctx) {
-    keep(t, ['id', 'groupId', 'name', 'low'].concat(withCreatedAt ? ['createdAt'] : []), ctx);
+    countUnknownFields(t, ['id', 'groupId', 'name', 'low'].concat(withCreatedAt ? ['createdAt'] : []), ctx);
     var out = { id: t.id, groupId: t.groupId, name: t.name, low: t.low === true };
     if (withCreatedAt) out.createdAt = t.createdAt;
     return out;
@@ -333,11 +355,11 @@
   // 검증을 통과한 데이터에서 알려진 필드만 복사해 새 객체를 만든다. { data, dropped }
   function normalize(data) {
     var ctx = { dropped: 0 };
-    keep(data, ['app', 'exportedAt', 'version'].concat(DATA_KEYS), ctx); // app, exportedAt은 내보내기 메타라 버린 것으로 세지 않는다
+    countUnknownFields(data, ['app', 'exportedAt', 'version'].concat(DATA_KEYS), ctx); // app, exportedAt은 내보내기 메타라 버린 것으로 세지 않는다
     var out = {
       version: VERSION,
       games: data.games.map(function (g) {
-        keep(g, ['id', 'name', 'cycles', 'levels', 'folders'], ctx);
+        countUnknownFields(g, ['id', 'name', 'cycles', 'levels', 'folders'], ctx);
         return {
           id: g.id, name: g.name,
           cycles: g.cycles.map(function (c) { return normCycle(c, ctx); }),
@@ -348,16 +370,16 @@
       groups: data.groups.map(function (g) { return normGroup(g, true, ctx); }),
       tasks: data.tasks.map(function (t) { return normTask(t, true, ctx); }),
       records: data.records.map(function (r) {
-        keep(r, ['taskId', 'folderId', 'doneAt'], ctx);
+        countUnknownFields(r, ['taskId', 'folderId', 'doneAt'], ctx);
         return { taskId: r.taskId, folderId: r.folderId == null ? null : r.folderId, doneAt: r.doneAt };
       }),
       groupRecords: data.groupRecords.map(function (r) {
-        keep(r, ['groupId', 'folderId', 'doneAt'], ctx);
+        countUnknownFields(r, ['groupId', 'folderId', 'doneAt'], ctx);
         return { groupId: r.groupId, folderId: r.folderId == null ? null : r.folderId, doneAt: r.doneAt };
       }),
       presets: data.presets.map(function (p) {
-        keep(p, ['id', 'name', 'savedAt', 'game'], ctx);
-        keep(p.game, ['cycles', 'levels', 'folders', 'groups', 'tasks'], ctx);
+        countUnknownFields(p, ['id', 'name', 'savedAt', 'game'], ctx);
+        countUnknownFields(p.game, ['cycles', 'levels', 'folders', 'groups', 'tasks'], ctx);
         return {
           id: p.id, name: p.name, savedAt: p.savedAt,
           game: {
@@ -982,13 +1004,19 @@
         state.error = '저장된 데이터를 읽지 못했어요. JSON 형식이 아니에요.';
         return;
       }
-      var v = validateData(parsed);
-      if (!v.ok) {
+      var v, clean = null;
+      try {
+        v = validateData(parsed);
+        if (v.ok) clean = normalize(parsed).data;
+      } catch (e) {
+        v = { ok: false, error: '데이터 형식이 올바르지 않아요.' };
+      }
+      if (!v.ok || !clean) {
         mem = deepFreeze(emptyData()); state.status = 'corrupted';
         state.error = '저장된 데이터가 올바르지 않아요. ' + v.error;
         return;
       }
-      mem = deepFreeze(normalize(parsed).data);
+      mem = deepFreeze(clean);
       state.status = 'ok';
       state.error = null;
     }
@@ -1002,11 +1030,13 @@
       return status();
     }
 
-    // 다른 탭이 저장소를 바꿨으면 따라간다.
+    // 다른 탭이 저장소를 바꿨으면 따라간다. 저장소가 있는 모드에서 읽지 못하면 false (메모리 모드는 읽을 것이 없으니 true).
     function sync() {
-      if (!state.persistent) return;
+      if (!state.persistent) return true;
       var r = readRaw();
-      if (r.ok && r.value !== state.raw) applyRaw(r.value);
+      if (!r.ok) return false;
+      if (r.value !== state.raw) applyRaw(r.value);
+      return true;
     }
 
     function status() {
@@ -1029,25 +1059,41 @@
       try { storage.setItem(BROKEN_KEY, state.raw); return true; } catch (e) { return false; }
     }
 
+    // 후보 데이터를 "실제로 저장될 JSON" 기준으로 검증한다: 직렬화 → 다시 읽기 → 검증 → 정규화.
+    // (빈칸이 null이 되거나 Date가 문자열이 되는 차이를 저장 전에 드러내고, 저장·스냅샷에 같은 값을 쓴다.)
+    // 돌려주는 값: { ok:true, clean, text, dropped } 또는 { ok:false, error, errors? }
+    function prepare(candidate, errPrefix) {
+      var parsed, text;
+      try {
+        text = JSON.stringify(candidate);
+        if (typeof text !== 'string') return { ok: false, error: errPrefix + '저장할 수 없는 값이에요.' };
+        parsed = JSON.parse(text);
+      } catch (e) { return { ok: false, error: errPrefix + '저장할 수 없는 값이 있어요.' }; }
+      var v = validateData(parsed);
+      if (!v.ok) return { ok: false, error: errPrefix + v.error, errors: v.errors };
+      var norm;
+      try { norm = normalize(parsed); text = JSON.stringify(norm.data); } catch (e) { return { ok: false, error: errPrefix + '데이터 형식이 올바르지 않아요.' }; }
+      if (text.length > WRITE_LIMIT) return { ok: false, error: MSG.tooBig };
+      return { ok: true, clean: norm.data, text: text, dropped: norm.dropped };
+    }
+
     // 변경 하나를 적용한다. fn(draft)는 draft(복사본)를 고치거나 새 데이터를 돌려준다.
     // 검증이나 저장에 실패하면 아무것도 바꾸지 않고 { ok:false, error }를 돌려준다.
     function update(fn) {
-      sync();
+      if (!sync()) return { ok: false, error: MSG.readFail };
       if (state.status === 'corrupted') return { ok: false, error: MSG.corrupted };
       var draft = clone(mem);
       var result;
       try { result = fn(draft); } catch (e) { return { ok: false, error: '변경하지 못했어요. 변경 중에 오류가 났어요.' }; }
       if (result === NOOP) return { ok: true, data: mem };
       if (result !== undefined) draft = result;
-      var v = validateData(draft);
-      if (!v.ok) return { ok: false, error: '변경하지 못했어요. ' + v.error, errors: v.errors };
-      var clean = normalize(draft).data;
-      var text = JSON.stringify(clean);
+      var p = prepare(draft, '변경하지 못했어요. ');
+      if (!p.ok) return { ok: false, error: p.error, errors: p.errors };
       if (state.persistent) {
-        if (!writeRaw(text)) return { ok: false, error: MSG.saveFail };
-        state.raw = text;
+        if (!writeRaw(p.text)) return { ok: false, error: MSG.saveFail };
+        state.raw = p.text;
       }
-      mem = deepFreeze(clean);
+      mem = deepFreeze(p.clean);
       if (state.status === 'empty') state.status = 'ok';
       return { ok: true, data: mem };
     }
@@ -1069,34 +1115,67 @@
     }
 
     // 완료 기록을 쌓는다. 한 번 호출 = 한 번 저장 (전부 저장되거나 하나도 안 된다).
+    // 기록 하나의 모양을 검사하고 저장할 모양으로 바꾼다. 올바르지 않으면 null. (key: 'taskId' | 'groupId')
+    function recordShape(r, key) {
+      if (!isObj(r) || typeof r[key] !== 'string') return null;
+      if (!(r.folderId === undefined || r.folderId === null || typeof r.folderId === 'string')) return null;
+      var doneAt;
+      if (typeof r.doneAt === 'string') doneAt = r.doneAt;
+      else if (r.doneAt instanceof Date && !isNaN(r.doneAt.getTime())) doneAt = global.Reset.formatIso(r.doneAt);
+      else return null;
+      var out = {};
+      out[key] = r[key];
+      out.folderId = r.folderId === undefined ? null : r.folderId;
+      out.doneAt = doneAt;
+      return out;
+    }
+
     function addRecords(records, groupRecords) {
-      var rs = (records || []).map(function (r) {
-        return { taskId: r.taskId, folderId: r.folderId == null ? null : r.folderId, doneAt: typeof r.doneAt === 'string' ? r.doneAt : global.Reset.formatIso(r.doneAt) };
-      });
-      var gs = (groupRecords || []).map(function (r) {
-        return { groupId: r.groupId, folderId: r.folderId == null ? null : r.folderId, doneAt: typeof r.doneAt === 'string' ? r.doneAt : global.Reset.formatIso(r.doneAt) };
-      });
+      if ((records !== undefined && !Array.isArray(records)) || (groupRecords !== undefined && !Array.isArray(groupRecords))) return { ok: false, error: MSG.badRecords };
+      var rs = (records || []).map(function (r) { return recordShape(r, 'taskId'); });
+      var gs = (groupRecords || []).map(function (r) { return recordShape(r, 'groupId'); });
+      if (rs.indexOf(null) >= 0 || gs.indexOf(null) >= 0) return { ok: false, error: MSG.badRecords };
       return update(function (d) {
         rs.forEach(function (r) { d.records.push(r); });
         gs.forEach(function (r) { d.groupRecords.push(r); });
       });
     }
 
-    // 체크 해제용: period({start, end}) 안에 있는 기록만 지운다. 기간 밖 기록은 건드리지 않는다.
+    function validDate(x) { return x instanceof Date && !isNaN(x.getTime()); }
+
+    // 체크 해제용: 기간 안에 있는 기록만 지운다. 기간 밖 기록은 건드리지 않는다.
     // spec: { taskIds?: [id], groupId?: id, folderIds: [id | null], period }
+    //   period는 start·end가 모두 Date({start, end}, 끝은 포함하지 않음)이거나, 1회 주기처럼 끝이 없을 때만 { once:true, start: Date | null }이다.
+    //   조건이 올바르지 않으면 아무것도 지우지 않고 { ok:false, error }를 돌려준다.
     function removeRecordsInPeriod(spec) {
+      var bad = { ok: false, error: MSG.badRemove };
+      if (!isObj(spec)) return bad;
+      var taskIds = spec.taskIds === undefined ? [] : spec.taskIds;
+      var folderIds = spec.folderIds;
+      if (!Array.isArray(taskIds) || !taskIds.every(function (x) { return typeof x === 'string'; })) return bad;
+      if (!(spec.groupId === undefined || spec.groupId === null || typeof spec.groupId === 'string')) return bad;
+      if (!Array.isArray(folderIds) || !folderIds.every(function (x) { return x === null || typeof x === 'string'; })) return bad;
+      if (taskIds.length === 0 && (spec.groupId === undefined || spec.groupId === null)) return bad;
+      var p = spec.period, period;
+      if (!isObj(p)) return bad;
+      if (p.once === true) {
+        if (!(p.end === undefined || p.end === null)) return bad;
+        if (!(p.start === undefined || p.start === null || validDate(p.start))) return bad;
+        period = { start: p.start || null, end: null };
+      } else {
+        if (!validDate(p.start) || !validDate(p.end) || p.start.getTime() >= p.end.getTime()) return bad;
+        period = { start: p.start, end: p.end };
+      }
       var removed = 0;
-      var folderIds = spec.folderIds || [];
-      var taskIds = spec.taskIds || [];
       function match(folderId) { return folderIds.indexOf(folderId == null ? null : folderId) >= 0; }
       var res = update(function (d) {
         var keepRecords = d.records.filter(function (r) {
-          var hit = taskIds.indexOf(r.taskId) >= 0 && match(r.folderId) && global.Reset.inPeriod(r.doneAt, spec.period);
+          var hit = taskIds.indexOf(r.taskId) >= 0 && match(r.folderId) && global.Reset.inPeriod(r.doneAt, period);
           if (hit) removed++;
           return !hit;
         });
         var keepGroupRecords = d.groupRecords.filter(function (r) {
-          var hit = spec.groupId != null && r.groupId === spec.groupId && match(r.folderId) && global.Reset.inPeriod(r.doneAt, spec.period);
+          var hit = spec.groupId != null && r.groupId === spec.groupId && match(r.folderId) && global.Reset.inPeriod(r.doneAt, period);
           if (hit) removed++;
           return !hit;
         });
@@ -1125,7 +1204,7 @@
 
     // 가져오기: 구조 검증을 통과했을 때만 기존 데이터를 교체한다. 실패하면 기존 데이터는 그대로다.
     function importJson(text) {
-      sync();
+      if (!sync()) return { ok: false, error: MSG.readFail };
       if (typeof text !== 'string') return { ok: false, error: '파일 내용을 읽지 못했어요.' };
       if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
       if (text.length > LIMIT.text) return { ok: false, error: '파일이 너무 커요. 약 6MB까지 가져올 수 있어요.' };
@@ -1134,10 +1213,10 @@
       if (isObj(parsed) && parsed.app !== undefined && parsed.app !== APP) {
         return { ok: false, error: '이 앱에서 내보낸 파일이 아니에요.' };
       }
-      var v = validateData(parsed);
-      if (!v.ok) return { ok: false, error: v.error, errors: v.errors };
-      var norm = normalize(parsed);
-      var out = JSON.stringify(norm.data);
+      var p = prepare(parsed, '');
+      if (!p.ok) return { ok: false, error: p.error === MSG.tooBig ? '파일이 너무 커요. 약 6MB까지 가져올 수 있어요.' : p.error, errors: p.errors };
+      var norm = { data: p.clean, dropped: p.dropped };
+      var out = p.text;
       if (state.persistent) {
         if (state.status === 'corrupted' && !stash()) return { ok: false, error: MSG.stashFail };
         if (!writeRaw(out)) return { ok: false, error: MSG.saveFail };
