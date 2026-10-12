@@ -437,9 +437,14 @@
   }
 
   // 다른 화면으로 가는 링크. 메뉴처럼 누르기 직전에 테스트 시각(?now=)을 다시 계산해서 붙인다.
+  // href에 #앵커가 있으면 ?now=는 그 앞에 붙인다 (settings.html?now=…#presets).
   function navLink(text, href, className) {
-    var a = el('a', { href: href + global.Reset.nowQuery(), class: className || null, text: text });
-    function refresh() { a.setAttribute('href', href + global.Reset.nowQuery()); }
+    var hashAt = href.indexOf('#');
+    var path = hashAt < 0 ? href : href.slice(0, hashAt);
+    var hash = hashAt < 0 ? '' : href.slice(hashAt);
+    function target() { return path + global.Reset.nowQuery() + hash; }
+    var a = el('a', { href: target(), class: className || null, text: text });
+    function refresh() { a.setAttribute('href', target()); }
     ['pointerdown', 'mouseenter', 'focus', 'click'].forEach(function (ev) { a.addEventListener(ev, refresh); });
     return a;
   }

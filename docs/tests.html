@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>reset.js · store.js 테스트</title>
-  <link rel="stylesheet" href="../css/style.css?v=20261012-12">
+  <link rel="stylesheet" href="../css/style.css?v=20261012-14">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
     .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
@@ -50,9 +50,10 @@
   <div id="out"></div>
 </main>
 
-<script src="../js/reset.js?v=20261012-12"></script>
-<script src="../js/store.js?v=20261012-12"></script>
-<script src="../js/ui.js?v=20261012-12"></script>
+<script src="../js/reset.js?v=20261012-14"></script>
+<script src="../js/store.js?v=20261012-14"></script>
+<script src="../js/ui.js?v=20261012-14"></script>
+<script src="../js/presets.js?v=20261012-14"></script>
 <script>
 (function () {
   'use strict';
@@ -72,6 +73,7 @@
   var htmlTexts = null; // 형제 HTML 파일의 글 (http로 열었을 때만 읽는다)
   var htmlLoad = 'skip'; // 'skip'(file://라 읽지 않음) | 'failed'(http인데 읽지 못함) | 'ok'
   var htmlError = null;
+  var claudeText = null; // ../CLAUDE.md 본문 (기본 프리셋 7장 대조용)
   function suite(name, fn) { suites.push({ name: name, fn: fn }); }
 
   function fmtDate(d) {
@@ -2078,6 +2080,234 @@
       }, [true, true, false, true, true, false, true]);
     });
 
+    /* ---------- 8단계: 프리셋 ---------- */
+    var PR = window.Presets;
+    function emptyD() { return { version: 1, games: [], groups: [], tasks: [], records: [], groupRecords: [], presets: [] }; }
+    var PAT = D(10, 15, 9, 30);
+    function levelName(g, scope) { return scope === 'game' ? '공통' : g.levels[scope - 1]; }
+    // 게임 하나를 7장 비교용 글자(주기·묶음)로 바꾼다. presets.js와 별개로, 저장된 게임(d)에서 읽는다.
+    function normGame(d, g) {
+      var cyc = g.cycles.map(function (c) { return [c.name, c.type, c.time, c.day === undefined ? '' : c.day, c.date === undefined ? '' : c.date].join('|'); });
+      var cname = {}; g.cycles.forEach(function (c) { cname[c.id] = c.name; });
+      var groups = d.groups.filter(function (x) { return x.gameId === g.id; }).map(function (x) {
+        var tasks = d.tasks.filter(function (k) { return k.groupId === x.id; }).map(function (k) { return k.name + (k.low ? '~low' : ''); }).join(';;');
+        return [x.name, levelName(g, x.scope), cname[x.cycleId], x.required === null ? '' : x.required, tasks].join('|');
+      });
+      return { name: g.name, levels: g.levels, cycles: cyc, groups: groups };
+    }
+    // presets.js의 행을 같은 글자로
+    function normDef(def) {
+      return {
+        name: def.name, levels: def.levels,
+        cycles: def.cycles.map(function (c) { return [c.name, c.type, c.time, c.day === undefined ? '' : c.day, c.date === undefined ? '' : c.date].join('|'); }),
+        groups: def.groups.map(function (g) { return [g.name, g.scope, g.cycle, g.required === null ? '' : g.required, g.tasks.map(function (k) { return k.name + (k.low ? '~low' : ''); }).join(';;')].join('|'); })
+      };
+    }
+    // CLAUDE.md 7장을 읽는다 (구현과 다른 방식의 줄 단위 파서). "(중요도 낮음)"은 이름 끝에 있을 때만 low로 본다.
+    function parseMd7(md) {
+      var DAY = { '일': 0, '월': 1, '화': 2, '수': 3, '목': 4, '금': 5, '토': 6 };
+      var lines = md.slice(md.indexOf('## 7. 기본 프리셋')).split(/\r?\n/);
+      var out = [], cur = null;
+      lines.forEach(function (line) {
+        var h = /^### 7-\d+\. (.+)$/.exec(line);
+        if (h) { cur = { name: h[1].replace(/ \(.*$/, '').trim(), levels: [], cycles: [], groups: [] }; out.push(cur); return; }
+        if (!cur) return;
+        var lv = /^- 단계: (.+)$/.exec(line);
+        if (lv) { cur.levels = lv[1] === '없음' ? [] : lv[1].replace(/`/g, '').split(' › '); return; }
+        var cy = /^- 리셋 주기: (.+)$/.exec(line);
+        if (cy) {
+          cy[1].split(' / ').forEach(function (seg) {
+            var m = /^\*\*(.+)\*\* (?:(매일)|매주 (.)|매월 (\d+)일) (\d\d:\d\d)$/.exec(seg);
+            if (!m) { cur.cycles.push('?' + seg); return; }
+            cur.cycles.push([m[1], m[2] ? 'daily' : (m[3] ? 'weekly' : 'monthly'), m[5], m[3] ? DAY[m[3]] : '', m[4] ? +m[4] : ''].join('|'));
+          });
+          return;
+        }
+        if (/^\|/.test(line) && !/^\| 묶음/.test(line) && !/^\|[-|]+$/.test(line)) {
+          var c = line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (x) { return x.trim(); });
+          var tasks = c[4].split(/, (?![^()]*\))/).map(function (nm) { return nm.slice(-8) === '(중요도 낮음)' ? nm.slice(0, -9) + '~low' : nm; }).join(';;');
+          cur.groups.push([c[0], c[1], c[2], c[3], tasks].join('|'));
+        }
+      });
+      return out;
+    }
+
+    suite('기본 프리셋 (presets.js) — 7장과 같은가', function () {
+      ok('presets.js를 불러왔다 (기본 프리셋 3개)', function () { return !!PR && PR.DEFAULTS.length === 3; });
+      if (!PR) return;
+      eq('이름 규칙: 끝의 "(중요도 낮음)"만 low로 떼고, "(레벨에 맞는 곳 1회)" 같은 이름의 일부 괄호는 그대로 둔다', function () {
+        var all = []; PR.DEFAULTS.forEach(function (d) { d.groups.forEach(function (g) { g.tasks.forEach(function (k) { all.push(k); }); }); });
+        var low = all.filter(function (k) { return k.low; }).map(function (k) { return k.name; });
+        var kept = all.filter(function (k) { return k.name.indexOf('(레벨에 맞는 곳 1회)') >= 0; }).length;
+        return [low, kept, all.filter(function (k) { return k.name.indexOf('중요도 낮음') >= 0; }).length];
+      }, [['익스트림 레이드', '작사에게 선물 주기', '이벤트 일일 임무'], 1, 0]);
+      eq('7장 설명 문단은 데이터에 없다 (게임 3개, 묶음 11·5·3개, 숙제 55·17·3개)', function () {
+        return PR.DEFAULTS.map(function (d) { return [d.name, d.groups.length, d.groups.reduce(function (n, g) { return n + g.tasks.length; }, 0)]; });
+      }, [['메이플스토리', 11, 55], ['로스트아크', 5, 17], ['작혼', 3, 3]]);
+      eq('Presets.build 결과는 "내 프리셋" 검증을 통과하는 모양이다 (3개 모두)', function () {
+        var d = emptyD(); PR.all().forEach(function (p) { d.presets.push({ id: p.id, name: p.name, savedAt: '2026-10-15T09:30:00', game: p.game }); });
+        return ST.validateData(d).ok;
+      }, true);
+      if (htmlLoad === 'skip') { skip('7장 표와 presets.js 대조', 'file://로 열어서 ../CLAUDE.md를 읽지 않았어요 (로컬 서버나 Pages 주소로 열면 돼요)'); return; }
+      if (htmlLoad === 'failed' || claudeText === null) { eq('CLAUDE.md를 읽어서 7장 대조를 할 수 있다', function () { return htmlError || 'CLAUDE.md를 읽지 못했어요'; }, null); return; }
+      var md = parseMd7(claudeText);
+      eq('7장의 게임 3개를 읽었고 주기 줄이 모두 해석된다', function () { return [md.length, md.every(function (x) { return x.cycles.every(function (c) { return c.charAt(0) !== '?'; }); })]; }, [3, true]);
+      eq('7장 표 = presets.js: 게임 이름·단계·주기 정의·묶음 순서와 이름·범위·주기·필요 개수·숙제 순서와 이름과 low가 하나도 다르지 않다', function () {
+        return md.map(function (x, i) { return JSON.stringify(x) === JSON.stringify(normDef(PR.DEFAULTS[i])); });
+      }, [true, true, true]);
+      eq('대조가 정말 잡아내는가: 7장의 숙제 이름 하나·필요 개수 하나·주기 시각 하나를 바꾼 복사본은 presets.js와 다르다', function () {
+        var variants = [claudeText.replace('소멸의 여로', '소멸의 여로X'), claudeText.replace('| 에픽 던전 | 계정 | 주간 | 3 |', '| 에픽 던전 | 계정 | 주간 | 2 |'), claudeText.replace('매일 00:00', '매일 01:00')];
+        return variants.map(function (v) { return JSON.stringify(parseMd7(v)) !== JSON.stringify(PR.DEFAULTS.map(normDef)); });
+      }, [true, true, true]);
+    });
+
+    suite('프리셋 불러오기 (ops.addGameFromPreset)', function () {
+      if (!PR) return;
+      var maple = PR.all()[0], loa = PR.all()[1], mj = PR.all()[2];
+      function load(p, o, d) { return mut(function (x) { return O.addGameFromPreset(x, p, Object.assign({ at: PAT, sameName: 'ask' }, o || {})); }, d || emptyD()); }
+      eq('기본 프리셋 3개를 불러오면 7장과 같은 게임이 된다 (주기·묶음·숙제를 저장된 게임에서 다시 읽어 비교)', function () {
+        return PR.all().map(function (p, i) { var m = load(p); return [m.r.ok, m.valid.ok, JSON.stringify(normGame(m.d, m.d.games[0])) === JSON.stringify(normDef(PR.DEFAULTS[i]))]; });
+      }, [[true, true, true], [true, true, true], [true, true, true]]);
+      eq('개수와 시각: 메이플은 주기 3·묶음 11·숙제 55·폴더 0, 숙제 만든 시각은 모두 at, 묶음은 새 게임을 가리킴', function () {
+        var m = load(maple), g = m.d.games[0];
+        return [m.r.summary, g.cycles.length, m.d.tasks.length, m.d.tasks.every(function (k) { return k.createdAt === '2026-10-15T09:30:00'; }), m.d.groups.every(function (x) { return x.gameId === g.id; }), m.d.records.length];
+      }, [{ cycles: 3, groups: 11, tasks: 55, folders: 0 }, 3, 55, true, true, 0]);
+      eq('id는 모두 새로 만든다: 프리셋 안의 c1·g1·t1이 남지 않고, 두 번 불러온 게임들끼리도 id가 겹치지 않는다', function () {
+        var d = emptyD(); O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' }); O.addGameFromPreset(d, mj, { at: PAT, sameName: 'add' });
+        var ids = []; d.games.forEach(function (g) { ids.push(g.id); g.cycles.forEach(function (c) { ids.push(c.id); }); }); d.groups.forEach(function (x) { ids.push(x.id); }); d.tasks.forEach(function (x) { ids.push(x.id); });
+        var set = {}; ids.forEach(function (i) { set[i] = 1; });
+        return [ids.length === Object.keys(set).length, ids.some(function (i) { return /^(c|g|t)\d+$/.test(i); }), ST.validateData(d).ok];
+      }, [true, false, true]);
+      eq('폴더 입력(들여쓰기): 로스트아크 "원정대 › 캐릭터"에 폴더 3개가 단계와 상위 폴더에 맞게 만들어진다', function () {
+        var m = load(loa, { folderText: '원정대A\n  캐릭1\n  캐릭2' }), f = m.d.games[0].folders;
+        return [f.map(function (x) { return x.name + ':' + x.level; }), f[1].parentId === f[0].id, f[2].parentId === f[0].id, m.valid.ok];
+      }, [['원정대A:1', '캐릭1:2', '캐릭2:2'], true, true, true]);
+      eq('폴더 입력이 단계 수보다 깊으면 오류이고 아무것도 바뀌지 않는다, 비우면 폴더 없이 추가된다, 단계가 없는 프리셋은 입력을 무시한다', function () {
+        var d0 = emptyD(), a = clone(d0); var r = O.addGameFromPreset(a, loa, { at: PAT, sameName: 'ask', folderText: 'a\n  b\n    c' });
+        return [r.ok, JSON.stringify(a) === JSON.stringify(d0), load(loa, { folderText: '  \n' }).d.games[0].folders.length, load(mj, { folderText: '무시\n  됨' }).d.games[0].folders.length];
+      }, [false, true, 0, 0]);
+      eq('같은 이름의 게임이 있으면 덮어쓰지 않고 확인이 필요하다고 돌려주며 아무것도 바뀌지 않는다 (ask)', function () {
+        var d = emptyD(); O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' }); var before = JSON.stringify(d);
+        var r = O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' });
+        return [r.ok, r.needsConfirm, JSON.stringify(d) === before];
+      }, [false, 'sameName', true]);
+      eq('따로 하나 더 추가(add): 같은 이름의 새 게임이 생기고 기존 게임·묶음·숙제는 그대로다', function () {
+        var d = emptyD(); O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' });
+        var g0 = JSON.stringify(d.games[0]), gr0 = JSON.stringify(d.groups), t0 = JSON.stringify(d.tasks);
+        var r = O.addGameFromPreset(d, mj, { at: D(10, 16, 1, 0), sameName: 'add' });
+        return [r.ok, d.games.length, d.games[0].name === d.games[1].name, JSON.stringify(d.games[0]) === g0, JSON.stringify(d.groups.slice(0, 3)) === gr0, JSON.stringify(d.tasks.slice(0, 3)) === t0, d.tasks.length];
+      }, [true, 2, true, true, true, true, 6]);
+      eq('기존 데이터와 완료 기록은 절대 건드리지 않는다: 이미 게임·기록·내 프리셋이 있는 데이터에 불러와도 앞부분이 그대로다', function () {
+        var d = withRecs(board(), [rc('tk1', 'fc1', TODAY)], [grc('gr2', 'fc1', TODAY)]); d.presets.push({ id: 'ps1', name: 'P', savedAt: '2026-10-15T09:30:00', game: loa.game });
+        var snap = JSON.stringify([d.games, d.groups, d.tasks, d.records, d.groupRecords, d.presets]);
+        var r = O.addGameFromPreset(d, maple, { at: PAT, sameName: 'ask' });
+        return [r.ok, JSON.stringify([d.games.slice(0, 1), d.groups.slice(0, 5), d.tasks.slice(0, 8), d.records, d.groupRecords, d.presets]) === JSON.stringify([JSON.parse(snap)[0], JSON.parse(snap)[1], JSON.parse(snap)[2], JSON.parse(snap)[3], JSON.parse(snap)[4], JSON.parse(snap)[5]]), d.games.length, ST.validateData(d).ok];
+      }, [true, true, 2, true]);
+      eq('잘못된 입력은 거부하고 바뀌지 않는다: 시각 없음, 이름 없는 프리셋, 프리셋 없음, 게임 100개 상한', function () {
+        var d = emptyD(), s = JSON.stringify(d);
+        var a = O.addGameFromPreset(d, mj, { sameName: 'ask' }), b = O.addGameFromPreset(d, { name: '', game: mj.game }, { at: PAT }), c = O.addGameFromPreset(d, null, { at: PAT });
+        var full = emptyD(); for (var i = 0; i < 100; i++) full.games.push({ id: 'x' + i, name: 'g' + i, cycles: [], levels: [], folders: [] });
+        var e = O.addGameFromPreset(full, mj, { at: PAT });
+        return [a.ok, b.ok, c.ok, e.ok, JSON.stringify(d) === s, full.games.length];
+      }, [false, false, false, false, true, 100]);
+      eq('저장소에 적용(Store.apply)하면 한 번의 저장이고 다시 읽어도 같다, 같은 이름이면 apply 결과에 needsConfirm이 그대로 온다', function () {
+        var x = storeWith(emptyD()); var r = x.st.apply(function (d) { return O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' }); });
+        var raw = x.fs.items[KEY]; var r2 = x.st.apply(function (d) { return O.addGameFromPreset(d, mj, { at: PAT, sameName: 'ask' }); });
+        return [r.ok, r2.ok, r2.needsConfirm, x.fs.items[KEY] === raw, JSON.parse(raw).games.length];
+      }, [true, false, 'sameName', true, 1]);
+    });
+
+    suite('내 프리셋 (ops.savePreset·renamePreset·deletePreset)', function () {
+      if (!PR) return;
+      var SAT = D(10, 15, 11, 0);
+      function srcData() { // 메이플 모양 + 주기에 carry + 폴더에 끈 항목 + 완료 기록
+        var d = board(); d.games[0].cycles[0] = { id: 'cd', name: '일일', type: 'daily', time: '05:00', carry: { since: '2026-10-14T05:00:00', until: '2026-10-16T05:00:00' } };
+        return withRecs(d, [rc('tk1', 'fc1', TODAY)], [grc('gr2', 'fc1', TODAY)]);
+      }
+      function save(d, name, mode) { return mut(function (x) { return O.savePreset(x, 'gm1', name || '내 메이플', mode || 'ask', SAT); }, d || srcData()); }
+      eq('저장: 이름·주기·단계·폴더·묶음·숙제가 들어가고 검증을 통과한다 (프리셋 1개)', function () {
+        var m = save(), p = m.d.presets[0];
+        return [m.r.ok, m.valid.ok, m.d.presets.length, p.name, p.savedAt, p.game.levels, p.game.cycles.length, p.game.folders.length, p.game.groups.length, p.game.tasks.length];
+      }, [true, true, 1, '내 메이플', '2026-10-15T11:00:00', ['계정', '캐릭터'], 3, 5, 5, 8]);
+      eq('완료 기록·주기의 carry·게임 id·숙제의 만든 시각은 들어가지 않는다 (프리셋 JSON에 doneAt·carry·gameId·createdAt이 없다)', function () {
+        var txt = JSON.stringify(save().d.presets[0]);
+        return [txt.indexOf('doneAt'), txt.indexOf('carry'), txt.indexOf('gameId'), txt.indexOf('createdAt'), txt.indexOf('records')];
+      }, [-1, -1, -1, -1, -1]);
+      eq('id는 모두 새로 만들고, 폴더의 끈 항목은 프리셋 안의 새 숙제·묶음 id로 다시 이어진다 (원본이 끈 tk4 → 같은 이름의 새 숙제)', function () {
+        var m = save(), p = m.d.presets[0], src = m.d.games[0];
+        var oldIds = {}; src.folders.forEach(function (f) { oldIds[f.id] = 1; }); m.d.tasks.forEach(function (k) { oldIds[k.id] = 1; }); m.d.groups.forEach(function (g) { oldIds[g.id] = 1; });
+        var newIds = []; p.game.folders.forEach(function (f) { newIds.push(f.id); }); p.game.tasks.forEach(function (k) { newIds.push(k.id); }); p.game.groups.forEach(function (g) { newIds.push(g.id); });
+        var fa1 = p.game.folders[0], offTask = p.game.tasks.filter(function (k) { return k.id === fa1.off[0]; })[0];
+        return [newIds.some(function (i) { return oldIds[i]; }), fa1.off.length, offTask && offTask.name, src.folders[0].off];
+      }, [false, 1, 'tk4', ['tk4']]);
+      eq('같은 이름의 프리셋이 있으면 확인이 필요하고(ask) 바뀌지 않으며, 덮어쓰기(overwrite)는 같은 id로 내용과 저장 시각만 바뀐다(개수 그대로)', function () {
+        var m = save(), d = m.d, id0 = d.presets[0].id, s = JSON.stringify(d);
+        var a = O.savePreset(d, 'gm1', '내 메이플', 'ask', SAT); var unchanged = JSON.stringify(d) === s;
+        d.tasks.push({ id: 'tNew', groupId: 'gr1', name: '새 숙제', low: false, createdAt: '2026-10-15T00:00:00' });
+        var b = O.savePreset(d, 'gm1', '내 메이플', 'overwrite', D(10, 16, 1, 0));
+        return [a.ok, a.needsConfirm, a.existingId === id0, unchanged, b.ok, b.overwritten, d.presets.length, d.presets[0].id === id0, d.presets[0].game.tasks.length, d.presets[0].savedAt, ST.validateData(d).ok];
+      }, [false, 'sameName', true, true, true, true, 1, true, 9, '2026-10-16T01:00:00', true]);
+      eq('다른 이름으로 저장하면 프리셋이 하나 더 생긴다 / 100개 상한은 거부하고 바뀌지 않는다 / 잘못된 이름·게임·시각은 거부', function () {
+        var d = save().d; var r = O.savePreset(d, 'gm1', '다른 이름', 'ask', SAT);
+        var full = srcData(); for (var i = 0; i < 100; i++) full.presets.push({ id: 'p' + i, name: 'n' + i, savedAt: '2026-10-15T09:30:00', game: { cycles: [], levels: [], folders: [], groups: [], tasks: [] } });
+        var s = JSON.stringify(full), over = O.savePreset(full, 'gm1', '넘침', 'ask', SAT);
+        var e = srcData();
+        return [r.ok, d.presets.length, over.ok, JSON.stringify(full) === s, O.savePreset(e, 'gm1', ' ', 'ask', SAT).ok, O.savePreset(e, 'nope', 'x', 'ask', SAT).ok, O.savePreset(e, 'gm1', 'x', 'ask', null).ok, e.presets.length];
+      }, [true, 2, false, true, false, false, false, 0]);
+      eq('이름 바꾸기: 성공, 다른 프리셋과 같은 이름은 거부(저장·이름 바꾸기에서만 막고 가져온 중복은 그대로), 없는 프리셋·빈 이름 거부', function () {
+        var d = save().d; O.savePreset(d, 'gm1', '둘째', 'ask', SAT); var ids = d.presets.map(function (p) { return p.id; });
+        var a = O.renamePreset(d, ids[0], '새 이름'), dup = O.renamePreset(d, ids[0], '둘째'), same = O.renamePreset(d, ids[1], '둘째');
+        return [a.ok, d.presets[0].name, dup.ok, same.ok, O.renamePreset(d, 'nope', 'x').ok, O.renamePreset(d, ids[0], '  ').ok];
+      }, [true, '새 이름', false, true, false, false]);
+      eq('삭제: 내 프리셋은 지워지고 그 프리셋으로 만든 게임은 그대로, 기본 프리셋 id(builtin-…)나 없는 id는 지울 수 없고 바뀌지 않는다', function () {
+        var d = save().d; var r = O.addGameFromPreset(d, d.presets[0], { at: PAT, sameName: 'add' });
+        var gamesBefore = d.games.length, s = JSON.stringify(d);
+        var b = O.deletePreset(d, 'builtin-maple'), n = O.deletePreset(d, 'nope'); var same = JSON.stringify(d) === s;
+        var del = O.deletePreset(d, d.presets[0].id);
+        return [r.ok, b.ok, n.ok, same, del.ok, d.presets.length, d.games.length === gamesBefore];
+      }, [true, false, false, true, true, 0, true]);
+      eq('내 프리셋을 불러오면 폴더 구조와 끈 항목이 새 id로 그대로 복사된다 (폴더 입력은 무시), 원본 게임·프리셋과 id가 겹치지 않는다', function () {
+        var d = save().d; var r = O.addGameFromPreset(d, d.presets[0], { at: PAT, sameName: 'add', folderText: '무시' });
+        var g = d.games[1], src = d.games[0];
+        var t4 = d.tasks.filter(function (k) { return k.name === 'tk4' && d.groups.filter(function (x) { return x.id === k.groupId && x.gameId === g.id; }).length; })[0];
+        var shared = g.folders.some(function (f) { return src.folders.some(function (o) { return o.id === f.id; }) || d.presets[0].game.folders.some(function (o) { return o.id === f.id; }); });
+        return [r.ok, g.folders.map(function (f) { return f.name + ':' + f.level; }), g.folders[0].off.length === 1 && g.folders[0].off[0] === t4.id, shared, ST.validateData(d).ok, g.cycles.every(function (c) { return c.carry === undefined; })];
+      }, [true, ['본계정:1', '캐릭터1:2', '캐릭터2:2', '부계정:1', '캐릭터3:2'], true, false, true, true]);
+      eq('불러온 게임은 원본과 별개다: 한쪽을 고쳐도 다른 쪽·프리셋이 안 바뀐다', function () {
+        var d = save().d; O.addGameFromPreset(d, d.presets[0], { at: PAT, sameName: 'add' });
+        var presetJson = JSON.stringify(d.presets[0]); var srcJson = JSON.stringify([d.games[0], d.groups.filter(function (x) { return x.gameId === 'gm1'; })]);
+        var newGame = d.games[1]; newGame.name = '고침'; newGame.folders[0].name = '고친 폴더'; d.groups.filter(function (x) { return x.gameId === newGame.id; })[0].name = '고친 묶음'; d.tasks[d.tasks.length - 1].name = '고친 숙제'; newGame.folders[0].off.pop();
+        return [JSON.stringify(d.presets[0]) === presetJson, JSON.stringify([d.games[0], d.groups.filter(function (x) { return x.gameId === 'gm1'; })]) === srcJson];
+      }, [true, true]);
+      eq('폴더가 없는 내 프리셋은 기본 프리셋처럼 폴더 입력을 받는다', function () {
+        var d = srcData(); d.games[0].folders = []; d.groups = d.groups.filter(function (x) { return x.scope === 'game'; }); d.tasks = d.tasks.filter(function (k) { return k.groupId === 'gr3' || k.groupId === 'gr5'; }); d.records = []; d.groupRecords = [];
+        d.games[0].cycles[0] = { id: 'cd', name: '일일', type: 'daily', time: '05:00' };
+        var s = O.savePreset(d, 'gm1', '폴더 없음', 'ask', SAT); var r = O.addGameFromPreset(d, d.presets[0], { at: PAT, sameName: 'add', folderText: '가\n  나' });
+        return [s.ok, r.ok, d.games[1].folders.map(function (f) { return f.name; }), ST.validateData(d).ok];
+      }, [true, true, ['가', '나'], true]);
+      eq('내보내기 → 가져오기: 내 프리셋이 그대로 돌아오고 완료 기록은 프리셋에 없다', function () {
+        var x = storeWith(save().d); var out = x.st.exportJson().text; var y = ST.create(fake()); var im = y.importJson(out);
+        return [im.ok, im.summary.presets, JSON.stringify(y.get().presets) === JSON.stringify(x.st.get().presets), JSON.stringify(y.get().presets).indexOf('doneAt')];
+      }, [true, 1, true, -1]);
+    });
+
+    suite('링크 주소 (UI.navLink)와 ?now= / #앵커', function () {
+      var U = window.UI;
+      if (!U) return;
+      function withQuery(q, fn) { var orig = R.nowQuery; R.nowQuery = function () { return q; }; try { return fn(); } finally { R.nowQuery = orig; } }
+      eq('테스트 시각이 아니면 주소 그대로, #앵커도 그대로 (settings.html#presets)', function () {
+        return withQuery('', function () { return [U.navLink('a', 'settings.html', 'btn').getAttribute('href'), U.navLink('a', 'settings.html#presets', 'btn').getAttribute('href')]; });
+      }, ['settings.html', 'settings.html#presets']);
+      eq('테스트 시각이면 ?now=는 #앵커 앞에 붙는다 (settings.html?now=…#presets), 앵커가 없으면 끝에 붙는다', function () {
+        return withQuery('?now=2026-10-15T05:59:50', function () { return [U.navLink('a', 'settings.html#presets', 'btn').getAttribute('href'), U.navLink('a', 'index.html', 'btn').getAttribute('href'), U.navLink('a', 'history.html', null).getAttribute('href')]; });
+      }, ['settings.html?now=2026-10-15T05:59:50#presets', 'index.html?now=2026-10-15T05:59:50', 'history.html?now=2026-10-15T05:59:50']);
+      eq('누르기 직전에 다시 계산한다 (pointerdown 뒤 주소가 그때의 ?now=로 바뀐다), 앵커는 유지', function () {
+        var a = withQuery('?now=A', function () { return U.navLink('a', 'settings.html#presets', 'btn'); });
+        withQuery('?now=B', function () { a.dispatchEvent(new Event('pointerdown')); });
+        return a.getAttribute('href');
+      }, 'settings.html?now=B#presets');
+    });
+
     suite('체크 저장 (checkTask, uncheckTask)', function () {
       var AT = D(10, 15, 12, 0);
       eq('칸 체크: 완료 기록 하나(doneAt 문자열)가 쌓이고 검증을 통과한다', function () {
@@ -2348,8 +2578,9 @@
     runAll();
   } else {
     var names = Object.keys(HTML_FILES);
-    Promise.all(names.map(function (n) { return fetch(HTML_FILES[n], { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(HTML_FILES[n] + ' 읽기 실패 (' + r.status + ')'); return r.text(); }); }))
-      .then(function (texts) { htmlTexts = {}; names.forEach(function (n, i) { htmlTexts[n] = texts[i]; }); htmlLoad = 'ok'; runAll(); },
+    var sources = names.map(function (n) { return HTML_FILES[n]; }).concat(['../CLAUDE.md']);
+    Promise.all(sources.map(function (u) { return fetch(u, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(u + ' 읽기 실패 (' + r.status + ')'); return r.text(); }); }))
+      .then(function (texts) { htmlTexts = {}; names.forEach(function (n, i) { htmlTexts[n] = texts[i]; }); claudeText = texts[names.length]; htmlLoad = 'ok'; runAll(); },
             function (e) { htmlTexts = null; htmlLoad = 'failed'; htmlError = (e && e.message) || String(e); runAll(); });
   }
 })();

@@ -1134,8 +1134,119 @@
       return removed ? { ok: true, removed: removed } : { ok: true, noop: true };
     }
 
+    /* ----- 프리셋 (8단계) ----- */
+    // 프리셋은 { id, name, savedAt?, game: { cycles, levels, folders, groups, tasks } } 모양이다 (기본 프리셋은 presets.js가 같은 모양으로 만든다).
+    // 불러오기와 저장은 내용을 새 id로 복사하므로, 만들어진 쪽과 원본은 서로 영향을 주지 않는다.
+
+    // 주기·폴더·묶음·숙제를 새 id로 복사한다. 주기의 carry(기록 이력에 딸린 값)는 버리고, 폴더의 끈 항목은 새 id로 다시 잇는다.
+    // 돌려주는 값: { cycles, folders, groups(gameId 없음), tasks(createdAt 없음) }
+    function cloneContent(cycles, folders, groups, tasks, used) {
+      var idMap = Object.create(null);
+      function fresh(prefix, old) { var id = makeId(prefix, used); idMap[old] = id; return id; }
+      var outCycles = cycles.map(function (c) {
+        var o = JSON.parse(JSON.stringify(c));
+        delete o.carry;
+        o.id = fresh('cy', c.id);
+        return o;
+      });
+      var outGroups = groups.map(function (g) {
+        return { id: fresh('gr', g.id), name: g.name, cycleId: idMap[g.cycleId], scope: g.scope, required: g.required === undefined ? null : g.required, low: g.low === true };
+      });
+      var outTasks = tasks.map(function (x) {
+        return { id: fresh('tk', x.id), groupId: idMap[x.groupId], name: x.name, low: x.low === true };
+      });
+      var folderMap = Object.create(null);
+      var outFolders = folders.map(function (f) { var id = makeId('fo', used); folderMap[f.id] = id; return { id: id, f: f }; }).map(function (x) {
+        var f = x.f;
+        return { id: x.id, parentId: f.parentId == null ? null : folderMap[f.parentId], level: f.level, name: f.name,
+          off: (f.off || []).map(function (o) { return idMap[o]; }).filter(function (o) { return o !== undefined; }) };
+      });
+      return { cycles: outCycles, folders: outFolders, groups: outGroups, tasks: outTasks };
+    }
+
+    // 프리셋으로 새 게임 하나를 추가한다. 기존 게임·기록·다른 프리셋은 건드리지 않는다.
+    // o: { folderText?, sameName: 'ask' | 'add', at }
+    //   같은 이름의 게임이 있고 sameName이 'ask'이면 아무것도 바꾸지 않고 { ok:false, needsConfirm:'sameName' }을 돌려준다.
+    //   프리셋에 폴더가 있으면 그 구조와 끈 항목을 그대로 복사하고(folderText는 무시), 없으면 folderText(들여쓰기)로 폴더를 만든다.
+    //   숙제의 만든 시각(createdAt)은 at이다.
+    function addGameFromPreset(d, preset, o) {
+      o = o || {};
+      if (!isObj(preset) || !isObj(preset.game)) return fail('프리셋을 찾을 수 없어요.');
+      if (!validAt(o.at)) return fail(BAD_AT);
+      var n = cleanName(preset.name); if (n.error) return fail(n.error);
+      if (d.games.length >= LIMIT.games) return fail('게임은 ' + LIMIT.games + '개까지예요.');
+      var pg = preset.game;
+      var same = d.games.some(function (g) { return g.name === n.value; });
+      if (same && o.sameName !== 'add') return { ok: false, needsConfirm: 'sameName', error: '같은 이름의 게임이 이미 있어요.' };
+
+      var nodes = null;
+      if (!pg.folders.length && pg.levels.length > 0 && typeof o.folderText === 'string' && o.folderText.trim() !== '') {
+        var parsed = parseFolderTree(o.folderText, pg.levels.length);
+        if (!parsed.ok) return parsed;
+        nodes = parsed.nodes;
+      }
+      var used = allIds(d);
+      var gid = makeId('gm', used);
+      var c = cloneContent(pg.cycles, pg.folders, pg.groups, pg.tasks, used);
+      if (nodes) {
+        var stack = [];
+        nodes.forEach(function (node) {
+          var up = node.depth === 0 ? null : stack[node.depth - 1];
+          var f = { id: makeId('fo', used), parentId: up ? up.id : null, level: node.depth + 1, name: node.name, off: [] };
+          c.folders.push(f);
+          stack[node.depth] = f;
+          stack.length = node.depth + 1;
+        });
+      }
+      if (c.folders.length > LIMIT.folders) return fail('폴더는 한 게임에 ' + LIMIT.folders + '개까지예요.');
+      var created = global.Reset.formatIso(o.at);
+      d.games.push({ id: gid, name: n.value, cycles: c.cycles, levels: pg.levels.slice(), folders: c.folders });
+      c.groups.forEach(function (g) { d.groups.push({ id: g.id, gameId: gid, name: g.name, cycleId: g.cycleId, scope: g.scope, required: g.required, low: g.low }); });
+      c.tasks.forEach(function (x) { d.tasks.push({ id: x.id, groupId: x.groupId, name: x.name, low: x.low, createdAt: created }); });
+      return { ok: true, id: gid, summary: { cycles: c.cycles.length, groups: c.groups.length, tasks: c.tasks.length, folders: c.folders.length } };
+    }
+
+    // 게임 하나를 "내 프리셋"으로 저장한다 (이름·주기·단계·폴더와 끈 항목·묶음·숙제만. 완료 기록과 주기의 carry는 넣지 않는다).
+    // 같은 이름의 프리셋이 있고 mode가 'overwrite'가 아니면 { ok:false, needsConfirm:'sameName', existingId }를 돌려준다.
+    function savePreset(d, gameId, name, mode, at) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      if (!validAt(at)) return fail(BAD_AT);
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      var same = null;
+      d.presets.forEach(function (p) { if (p.name === n.value) same = p; });
+      if (same && mode !== 'overwrite') return { ok: false, needsConfirm: 'sameName', existingId: same.id, error: '같은 이름의 프리셋이 이미 있어요.' };
+      if (!same && d.presets.length >= LIMIT.presets) return fail('내 프리셋은 ' + LIMIT.presets + '개까지예요.');
+      var used = allIds(d);
+      var groups = groupsOf(d, gameId);
+      var c = cloneContent(g.cycles, g.folders, groups, tasksOfGroups(d, groups.map(function (x) { return x.id; })), used);
+      var preset = { id: same ? same.id : makeId('ps', used), name: n.value, savedAt: global.Reset.formatIso(at),
+        game: { cycles: c.cycles, levels: g.levels.slice(), folders: c.folders, groups: c.groups, tasks: c.tasks } };
+      if (same) d.presets[d.presets.indexOf(same)] = preset; else d.presets.push(preset);
+      return { ok: true, id: preset.id, overwritten: !!same };
+    }
+
+    function renamePreset(d, presetId, name) {
+      var p = null;
+      d.presets.forEach(function (x) { if (x.id === presetId) p = x; });
+      if (!p) return fail('프리셋을 찾을 수 없어요.');
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      var dup = d.presets.some(function (x) { return x !== p && x.name === n.value; });
+      if (dup) return fail('같은 이름의 프리셋이 이미 있어요.');
+      p.name = n.value;
+      return { ok: true };
+    }
+
+    // 내 프리셋만 지울 수 있다. 기본 프리셋은 저장소에 없고 코드에만 있으므로 지울 대상이 아니다.
+    function deletePreset(d, presetId) {
+      var before = d.presets.length;
+      d.presets = d.presets.filter(function (x) { return x.id !== presetId; });
+      if (d.presets.length === before) return fail('프리셋을 찾을 수 없어요. (기본 프리셋은 지울 수 없어요.)');
+      return { ok: true };
+    }
+
     return {
       checkTask: checkTask, uncheckTask: uncheckTask, checkFolder: checkFolder, checkColumn: checkColumn, uncheckFolder: uncheckFolder,
+      addGameFromPreset: addGameFromPreset, savePreset: savePreset, renamePreset: renamePreset, deletePreset: deletePreset,
       addGame: addGame, renameGame: renameGame, impactGame: impactGame, deleteGame: deleteGame, moveGame: moveGame,
       addCycle: addCycle, updateCycle: updateCycle, canDeleteCycle: canDeleteCycle, deleteCycle: deleteCycle,
       addLevelBelow: addLevelBelow, addLevelAbove: addLevelAbove, renameLevel: renameLevel, impactLevel: impactLevel, canDeleteLevel: canDeleteLevel, deleteLevel: deleteLevel,
