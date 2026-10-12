@@ -157,18 +157,22 @@
     return true;
   }
 
-  // 지금 포커스가 어느 숙제 칸 안에 있는지 (칸을 바꿔 끼우면 포커스가 사라지므로 되돌려 주려고)
-  function focusedTaskKey() {
+  // 지금 포커스가 어느 숙제 칸의 어떤 요소(제목 줄 / 더 보기 버튼) 안에 있는지. 칸을 바꿔 끼우면 포커스가 사라지므로
+  // 바꿔 끼운 뒤 같은 종류의 요소로 되돌려 주려고 미리 적어 둔다.
+  function focusInfo() {
     var a = document.activeElement;
     var d = a && a.closest ? a.closest('details.htask') : null;
-    return d && host.contains(d) ? d.getAttribute('data-key') : null;
+    if (!d || !host.contains(d)) return null;
+    return { el: a, key: d.getAttribute('data-key'), kind: a.hasAttribute('data-more') ? 'more' : 'summary' };
   }
 
-  function restoreFocus(key) {
-    var d = key ? state.els[key] : null;
+  // 포커스가 있던 요소가 실제로 사라졌을 때만(또는 "더 보기"를 눌러 바꿔 끼웠을 때) 같은 종류의 요소로 되돌린다.
+  function restoreFocus(info) {
+    if (!info || document.contains(info.el)) return;
+    var d = state.els[info.key];
     if (!d) return;
-    var btn = d.querySelector('button[data-more]');
-    (btn || d.querySelector('summary')).focus();
+    var target = info.kind === 'more' ? d.querySelector('button[data-more]') : null;
+    (target || d.querySelector('summary')).focus();
   }
 
   function refresh(force) {
@@ -179,8 +183,9 @@
     var at = Reset.now();
     var year = at.getFullYear();
     var model = Reset.buildHistory({ games: d.games, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at, limits: state.limits });
-    var focusKey = state.focusKey || focusedTaskKey();
-    state.focusKey = null;
+    var info = focusInfo();
+    if (state.focusKey) { info = { el: null, key: state.focusKey, kind: 'more' }; state.focusKey = null; } // "더 보기"를 누른 직후
+
 
     var struct = structSigOf(model, year);
     if (struct !== state.struct) {
@@ -188,7 +193,7 @@
       state.taskSigs = Object.create(null);
       render(model, at);
       model.games.forEach(function (gm) { gm.sections.forEach(function (s) { s.groups.forEach(function (g) { g.tasks.forEach(function (t) { state.taskSigs[taskKey(gm, t)] = taskSigOf(t, year); }); }); }); });
-      restoreFocus(focusKey);
+      restoreFocus(info);
     } else {
       // 구조가 같으면 내용이 달라진 숙제 칸만 바꿔 끼운다
       model.games.forEach(function (gm) {
@@ -205,7 +210,7 @@
           });
         });
       });
-      restoreFocus(focusKey);
+      restoreFocus(info);
     }
     // 리셋 순간에 새 기간이 생기므로 가장 빠른 리셋 직후에 다시 계산한다 (길어도 60초)
     state.timer = setTimeout(function () { refresh(false); }, Reset.resetDelay(model.remainingMs));

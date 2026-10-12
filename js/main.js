@@ -239,7 +239,8 @@
     });
     // 안 한 숙제를 위에, 완료한 숙제는 아래쪽에 (각각 설정한 순서)
     order.sort(function (a, b) { return a.rank - b.rank || a.i - b.i; });
-    var cur = Array.prototype.map.call(ref.list.children, function (li) { return li.getAttribute('data-task'); });
+    // 보이는 행만 비교한다 (그 기간에 없던 숙제로 숨긴 행이 있어도 매번 다시 정렬하지 않는다)
+    var cur = Array.prototype.filter.call(ref.list.children, function (li) { return !li.hidden; }).map(function (li) { return li.getAttribute('data-task'); });
     var want = order.map(function (o) { return o.id; });
     if (cur.join('|') !== want.join('|')) {
       // 자리를 옮기려고 다시 끼워 넣으면 키보드 포커스가 사라지므로, 포커스가 이 목록 안에 있었다면 되돌린다
@@ -421,8 +422,9 @@
     UI.confirm({
       title: opts.title, message: opts.message, confirmLabel: opts.confirmLabel, danger: opts.danger,
       onConfirm: function () {
-        if (periodKey(opts.cycle, Reset.now()) !== key) return EXPIRED;
-        var r = opts.save(Reset.now());
+        var now = Reset.now(); // 기간 검사와 저장에 같은 시각을 쓴다
+        if (periodKey(opts.cycle, now) !== key) return EXPIRED;
+        var r = opts.save(now);
         return r.ok ? { ok: true } : r;
       }
     }).then(function () { refresh(true); });
@@ -433,8 +435,13 @@
     var fresh = freshGroup(groupId), node = fresh && fresh.gg.byId ? fresh.gg.byId[folderId] : null;
     if (!node) { refresh(true); return; }
     var name = node.folder.name, cb = node.checkbox, cycle = fresh.gg.cycle;
-    function save(at) { return (cb.state === 'all' ? Store.uncheckFolder : Store.checkFolder)({ groupId: groupId, folderId: folderId, at: at }); }
-    if (cb.state === 'all') {
+    // 체크할지 해제할지는 사용자가 누른 방향(box.checked)으로 정한다. 최신 판정은 대상 개수를 세는 데만 쓴다.
+    // (누르는 동안 리셋이 지나서 최신 상태가 달라졌어도 의도와 반대로 처리하지 않는다)
+    var wantCheck = box.checked;
+    var nothingToDo = wantCheck ? (cb.state === 'all' || cb.state === 'hidden') : (cb.state === 'none' || cb.state === 'hidden');
+    if (nothingToDo) { refresh(true); return; }
+    function save(at) { return (wantCheck ? Store.checkFolder : Store.uncheckFolder)({ groupId: groupId, folderId: folderId, at: at }); }
+    if (!wantCheck) {
       // 완료한 폴더의 체크를 풀면 확인 창을 거쳐 이번 기간 기록만 지운다
       confirmThenSave({
         title: '"' + name + '" 체크를 해제할까요?',
@@ -457,7 +464,7 @@
   function onColumn(btn) {
     var groupId = btn.getAttribute('data-group'), taskId = btn.getAttribute('data-col');
     var fresh = freshGroup(groupId);
-    if (!fresh) return;
+    if (!fresh || !fresh.gg.columns) { refresh(true); return; } // 묶음이 없어졌거나 표가 아니면 화면만 맞춘다
     var col = fresh.gg.columns.filter(function (c) { return c.task.id === taskId; })[0];
     if (!col || col.pending === 0) { refresh(true); return; }
     confirmThenSave({

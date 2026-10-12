@@ -1038,7 +1038,7 @@
           return { error: '이 폴더에서는 하지 않는 숙제예요.' };
         }
       }
-      return { task: task, ctx: ctx, fid: fid };
+      return { ctx: ctx, fid: fid };
     }
 
     // 칸 하나 체크: 그 칸이 이번 기간에 완료가 아니면 완료 기록 하나. 이미 완료면 noop.

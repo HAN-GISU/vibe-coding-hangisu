@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>reset.js · store.js 테스트</title>
-  <link rel="stylesheet" href="../css/style.css?v=20261012-10">
+  <link rel="stylesheet" href="../css/style.css?v=20261012-11">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
     .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
@@ -50,9 +50,9 @@
   <div id="out"></div>
 </main>
 
-<script src="../js/reset.js?v=20261012-10"></script>
-<script src="../js/store.js?v=20261012-10"></script>
-<script src="../js/ui.js?v=20261012-10"></script>
+<script src="../js/reset.js?v=20261012-11"></script>
+<script src="../js/store.js?v=20261012-11"></script>
+<script src="../js/ui.js?v=20261012-11"></script>
 <script>
 (function () {
   'use strict';
@@ -1760,12 +1760,12 @@
         addCommon(d, 'ga', 'ca', 'ta'); addCommon(d, 'gb', 'cb', 'tb'); addCommon(d, 'gc', 'cc', 'tc'); addCommon(d, 'gd', 'cd2', 'td');
         var l = ug(d); return [l.slice(0, 2).map(function (b) { return b.label; }), keys(l, '42초'), keys(l, '42분')];
       }, [['42초', '42분'], ['gc/', 'gd/'], ['ga/', 'gb/']]);
-      eq('받은 판정 결과를 바꾸지 않는다 (입력 전체를 얼려 두고 호출, 호출 전후 스냅샷 비교)', function () {
-        var d = withRecs(board(), [rc('tk1', 'fc1', TODAY)]); var m = eg(d);
-        var before = JSON.stringify([m]); deepFreeze(m);
-        var out = R.buildUrgent([m]);
-        return [before === JSON.stringify([m]), out.length > 0];
-      }, [true, true]);
+      eq('받은 판정 결과를 바꾸지 않는다 (넘긴 배열 자체와 게임 둘 모두 얼려 두고 호출, 같은 배열의 호출 전후 스냅샷 비교)', function () {
+        var evals = [eg(withRecs(board(), [rc('tk1', 'fc1', TODAY)])), eg(board())];
+        var before = JSON.stringify(evals); deepFreeze(evals);
+        var out = R.buildUrgent(evals);
+        return [before === JSON.stringify(evals), Object.isFrozen(evals), out.length > 0];
+      }, [true, true, true]);
       eq('게임이 없거나 묶음이 없으면 빈 목록', function () { var d = board(); d.groups = []; d.tasks = []; return [ug(d), R.buildUrgent([])]; }, [[], []]);
       eq('나중에 만든 숙제가 앞에 있어도 이름이 어긋나지 않는다 (A 10/17 생성, B 10/01 생성·미완료, 10/15 12:00 → B만 나온다)', function () {
         var d = board(); d.groups.push({ id: 'ga', gameId: 'gm1', name: 'ga', cycleId: 'cd', scope: 'game', required: null, low: false });
