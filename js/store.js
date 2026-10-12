@@ -373,6 +373,595 @@
     return { data: out, dropped: ctx.dropped };
   }
 
+  /* ---------- 데이터 변경 규칙 (Store.ops) ---------- */
+  // 저장소 초안(draft)을 받아 고치는 순수 함수들이다. 화면(settings.js)은 Store.apply(function (d) { return Store.ops.xxx(d, …); })로 부른다.
+  // 실패하면 { ok:false, error:"한국어 안내" }를 돌려주고 draft를 바꾸지 않는다. 성공하면 { ok:true, … }다.
+
+  var NOOP = {}; // update()의 변경 함수가 돌려주면 "바꿀 것이 없음"이라 저장하지 않는다.
+
+  var OPS_LIMIT = { treeLines: 500, taskLines: 200 };
+
+  function allIds(d) {
+    var used = Object.create(null);
+    function add(o) { if (o && typeof o.id === 'string') used[o.id] = true; }
+    d.games.forEach(function (g) { add(g); g.cycles.forEach(add); g.folders.forEach(add); });
+    d.groups.forEach(add);
+    d.tasks.forEach(add);
+    d.presets.forEach(function (p) {
+      add(p);
+      p.game.cycles.forEach(add); p.game.folders.forEach(add); p.game.groups.forEach(add); p.game.tasks.forEach(add);
+    });
+    return used;
+  }
+
+  // 새 id. 접두어 + 시간(36진수) + 난수. used에 있는 id와 겹치지 않고, 만든 id는 used에 기록한다.
+  function makeId(prefix, used) {
+    var id;
+    do {
+      id = (prefix || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    } while (used[id]);
+    used[id] = true;
+    return id;
+  }
+
+  var ops = (function () {
+    function fail(error) { return { ok: false, error: error }; }
+
+    function cleanName(name) {
+      var s = typeof name === 'string' ? name.trim() : '';
+      if (!s) return { error: '이름을 입력해 주세요.' };
+      if (s.length > LIMIT.name) return { error: '이름은 ' + LIMIT.name + '자 이하로 적어 주세요.' };
+      return { value: s };
+    }
+
+    function findGame(d, id) {
+      for (var i = 0; i < d.games.length; i++) if (d.games[i].id === id) return d.games[i];
+      return null;
+    }
+    function findGroup(d, id) {
+      for (var i = 0; i < d.groups.length; i++) if (d.groups[i].id === id) return d.groups[i];
+      return null;
+    }
+    function findTask(d, id) {
+      for (var i = 0; i < d.tasks.length; i++) if (d.tasks[i].id === id) return d.tasks[i];
+      return null;
+    }
+    function findFolder(d, id) {
+      for (var i = 0; i < d.games.length; i++) {
+        var fs = d.games[i].folders;
+        for (var j = 0; j < fs.length; j++) if (fs[j].id === id) return { game: d.games[i], folder: fs[j], index: j };
+      }
+      return null;
+    }
+
+    function groupsOf(d, gameId) { return d.groups.filter(function (g) { return g.gameId === gameId; }); }
+    function tasksOfGroups(d, groupIds) {
+      var set = {}; groupIds.forEach(function (id) { set[id] = true; });
+      return d.tasks.filter(function (t) { return set[t.groupId]; });
+    }
+
+    // 폴더와 그 아래 폴더 전부 (자기 자신 먼저, 형제 순서는 배열 순서)
+    function subtree(game, rootId) {
+      var out = [];
+      function walk(id) {
+        game.folders.forEach(function (f) {
+          if (f.id === id) { out.push(f); }
+        });
+        game.folders.forEach(function (f) { if (f.parentId === id) walk(f.id); });
+      }
+      walk(rootId);
+      return out;
+    }
+
+    function removeOffEntries(d, gameId, ids) {
+      var set = {}; ids.forEach(function (id) { set[id] = true; });
+      var g = findGame(d, gameId);
+      if (!g) return;
+      g.folders.forEach(function (f) { f.off = f.off.filter(function (x) { return !set[x]; }); });
+    }
+
+    function recordCount(d, taskIdSet, groupIdSet, folderIdSet) {
+      var r = 0, gr = 0;
+      d.records.forEach(function (x) {
+        if ((taskIdSet && taskIdSet[x.taskId]) || (folderIdSet && x.folderId != null && folderIdSet[x.folderId])) r++;
+      });
+      d.groupRecords.forEach(function (x) {
+        if ((groupIdSet && groupIdSet[x.groupId]) || (folderIdSet && x.folderId != null && folderIdSet[x.folderId])) gr++;
+      });
+      return { records: r, groupRecords: gr };
+    }
+    function toSet(list) { var s = {}; list.forEach(function (x) { s[x] = true; }); return s; }
+
+    // 같은 무리(sameFn) 안에서 id를 위(-1)·아래(+1)로 한 칸 옮긴다. 끝이면 noop.
+    function moveWithin(list, id, delta, sameFn) {
+      var idxs = [];
+      var pos = -1;
+      list.forEach(function (x, i) {
+        if (sameFn(x)) { if (x.id === id) pos = idxs.length; idxs.push(i); }
+      });
+      if (pos < 0) return fail('찾을 수 없어요.');
+      var target = pos + delta;
+      if (target < 0 || target >= idxs.length) return { ok: true, noop: true };
+      var a = idxs[pos], b = idxs[target];
+      var tmp = list[a]; list[a] = list[b]; list[b] = tmp;
+      return { ok: true };
+    }
+
+    /* ----- 게임 ----- */
+    function addGame(d, name) {
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      var id = makeId('gm', allIds(d));
+      d.games.push({ id: id, name: n.value, cycles: [], levels: [], folders: [] });
+      return { ok: true, id: id };
+    }
+    function renameGame(d, gameId, name) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      g.name = n.value;
+      return { ok: true };
+    }
+    function impactGame(d, gameId) {
+      var g = findGame(d, gameId);
+      if (!g) return { cycles: 0, levels: 0, folders: 0, groups: 0, tasks: 0, records: 0, groupRecords: 0 };
+      var groups = groupsOf(d, gameId);
+      var tasks = tasksOfGroups(d, groups.map(function (x) { return x.id; }));
+      var c = recordCount(d, toSet(tasks.map(function (x) { return x.id; })), toSet(groups.map(function (x) { return x.id; })), null);
+      return { cycles: g.cycles.length, levels: g.levels.length, folders: g.folders.length, groups: groups.length, tasks: tasks.length, records: c.records, groupRecords: c.groupRecords };
+    }
+    function deleteGame(d, gameId) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var groupIds = toSet(groupsOf(d, gameId).map(function (x) { return x.id; }));
+      var taskIds = {};
+      d.tasks.forEach(function (t) { if (groupIds[t.groupId]) taskIds[t.id] = true; });
+      d.records = d.records.filter(function (r) { return !taskIds[r.taskId]; });
+      d.groupRecords = d.groupRecords.filter(function (r) { return !groupIds[r.groupId]; });
+      d.tasks = d.tasks.filter(function (t) { return !taskIds[t.id]; });
+      d.groups = d.groups.filter(function (x) { return x.gameId !== gameId; });
+      d.games = d.games.filter(function (x) { return x.id !== gameId; });
+      return { ok: true };
+    }
+    function moveGame(d, gameId, delta) {
+      return moveWithin(d.games, gameId, delta, function () { return true; });
+    }
+
+    /* ----- 리셋 주기 ----- */
+    function buildCycle(id, f) {
+      var c = { id: id, name: f.name, type: f.type };
+      if (f.type === 'daily' || f.type === 'weekly' || f.type === 'monthly') c.time = f.time;
+      if (f.type === 'weekly') c.day = f.day;
+      if (f.type === 'monthly') c.date = f.date;
+      if (f.type === 'interval') {
+        c.anchor = f.anchor;
+        var e = f.every || {};
+        c.every = { days: e.days || 0, hours: e.hours || 0, minutes: e.minutes || 0 };
+      }
+      return c;
+    }
+    // 주기의 정의(이름은 빼고)를 비교용 문자열로
+    function defKey(c) {
+      var anchor = null;
+      if (c.anchor) { var a = global.Reset.parseTime(c.anchor); anchor = a ? global.Reset.formatIso(a) : String(c.anchor); }
+      var e = c.every ? [c.every.days || 0, c.every.hours || 0, c.every.minutes || 0] : null;
+      return JSON.stringify([c.type, c.time === undefined ? null : c.time, c.day === undefined ? null : c.day, c.date === undefined ? null : c.date, anchor, e]);
+    }
+
+    // fields: { name, type, time?, day?, date?, anchor?, every? }
+    function addCycle(d, gameId, fields) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var n = cleanName(fields.name); if (n.error) return fail(n.error);
+      var c = buildCycle(makeId('cy', allIds(d)), { name: n.value, type: fields.type, time: fields.time, day: fields.day, date: fields.date, anchor: fields.anchor, every: fields.every });
+      var v = global.Reset.validateCycle(c); if (!v.ok) return fail(v.error);
+      g.cycles.push(c);
+      return { ok: true, id: c.id };
+    }
+
+    // 정의(종류·시각·요일·날짜·기준·간격)가 바뀌면 Reset.changeCycle을 거쳐 carry를 붙인다.
+    // 이름만 바꾸면 기존 carry를 그대로 둔다. at은 바꾼 시각(Reset.now()).
+    function updateCycle(d, gameId, cycleId, fields, at) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var idx = -1;
+      g.cycles.forEach(function (c, i) { if (c.id === cycleId) idx = i; });
+      if (idx < 0) return fail('리셋 주기를 찾을 수 없어요.');
+      var old = g.cycles[idx];
+      var n = cleanName(fields.name); if (n.error) return fail(n.error);
+      var next = buildCycle(old.id, { name: n.value, type: fields.type, time: fields.time, day: fields.day, date: fields.date, anchor: fields.anchor, every: fields.every });
+      var v = global.Reset.validateCycle(next); if (!v.ok) return fail(v.error);
+      if (defKey(next) === defKey(old)) {
+        old.name = n.value;
+        return { ok: true, changed: false };
+      }
+      g.cycles[idx] = global.Reset.changeCycle(old, next, at);
+      return { ok: true, changed: true };
+    }
+
+    function deleteCycle(d, gameId, cycleId) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var used = groupsOf(d, gameId).filter(function (x) { return x.cycleId === cycleId; });
+      if (used.length) {
+        var names = used.slice(0, 3).map(function (x) { return '"' + x.name + '"'; }).join(', ');
+        return fail(names + (used.length > 3 ? ' 외 ' + (used.length - 3) + '개' : '') + ' 묶음이 이 주기를 쓰고 있어요. 그 묶음을 지운 뒤에 지울 수 있어요.');
+      }
+      var before = g.cycles.length;
+      g.cycles = g.cycles.filter(function (c) { return c.id !== cycleId; });
+      if (g.cycles.length === before) return fail('리셋 주기를 찾을 수 없어요.');
+      return { ok: true };
+    }
+
+    /* ----- 단계 ----- */
+    function addLevelBelow(d, gameId, name) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      if (g.levels.length >= LIMIT.levels) return fail('단계는 ' + LIMIT.levels + '개까지예요.');
+      g.levels.push(n.value);
+      return { ok: true };
+    }
+
+    // 맨 위에 새 단계를 끼운다. 기존 폴더는 새 맨 위 폴더(topName) 하나 안으로 들어간다.
+    function addLevelAbove(d, gameId, name, topName) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      var t = cleanName(topName === undefined ? '기본' : topName); if (t.error) return fail(t.error);
+      if (g.levels.length >= LIMIT.levels) return fail('단계는 ' + LIMIT.levels + '개까지예요.');
+      g.levels.unshift(n.value);
+      var oldTops = [];
+      g.folders.forEach(function (f) { if (f.level === 1) oldTops.push(f); f.level += 1; });
+      groupsOf(d, gameId).forEach(function (x) { if (typeof x.scope === 'number') x.scope += 1; });
+      if (g.folders.length) {
+        var top = { id: makeId('fo', allIds(d)), parentId: null, level: 1, name: t.value, off: [] };
+        oldTops.forEach(function (f) { f.parentId = top.id; });
+        g.folders.unshift(top);
+      }
+      return { ok: true };
+    }
+
+    function renameLevel(d, gameId, level, name) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      if (!(level >= 1 && level <= g.levels.length)) return fail('단계를 찾을 수 없어요.');
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      g.levels[level - 1] = n.value;
+      return { ok: true };
+    }
+
+    // 지우기를 막는 것들: 그 단계의 폴더 수와 그 단계를 쓰는 묶음
+    function impactLevel(d, gameId, level) {
+      var g = findGame(d, gameId);
+      if (!g) return { folders: 0, groups: [] };
+      return {
+        folders: g.folders.filter(function (f) { return f.level === level; }).length,
+        groups: groupsOf(d, gameId).filter(function (x) { return x.scope === level; })
+      };
+    }
+    function deleteLevel(d, gameId, level) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      if (!(level >= 1 && level <= g.levels.length)) return fail('단계를 찾을 수 없어요.');
+      var imp = impactLevel(d, gameId, level);
+      var name = g.levels[level - 1];
+      if (imp.folders > 0) return fail('"' + name + '" 단계에 폴더가 ' + imp.folders + '개 있어서 지울 수 없어요. 폴더를 먼저 지워 주세요.');
+      if (imp.groups.length > 0) return fail('"' + name + '" 단계를 범위로 쓰는 묶음이 ' + imp.groups.length + '개 있어서 지울 수 없어요 (' + imp.groups.slice(0, 3).map(function (x) { return '"' + x.name + '"'; }).join(', ') + '). 그 묶음을 먼저 지워 주세요.');
+      g.levels.splice(level - 1, 1);
+      g.folders.forEach(function (f) { if (f.level > level) f.level -= 1; });
+      groupsOf(d, gameId).forEach(function (x) { if (typeof x.scope === 'number' && x.scope > level) x.scope -= 1; });
+      return { ok: true };
+    }
+
+    /* ----- 폴더 ----- */
+    // 들여쓰기로 쓴 폴더 목록을 읽는다. maxDepth는 쓸 수 있는 단계 수(가장 깊은 줄의 깊이 + 1이 이 값 이하여야 한다).
+    // 돌려주는 값: { ok, nodes: [{ name, depth }] } (입력 순서)
+    function parseFolderTree(text, maxDepth) {
+      if (typeof text !== 'string') return fail('폴더 이름을 적어 주세요.');
+      var lines = text.split(/\r\n|\r|\n/);
+      var nodes = [];
+      var unit = null;      // 한 단계의 들여쓰기 (공백 수 또는 탭)
+      var unitKind = null;  // 'space' | 'tab'
+      var prevDepth = -1;
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (line.trim() === '') continue;
+        if (nodes.length >= OPS_LIMIT.treeLines) return fail('한 번에 ' + OPS_LIMIT.treeLines + '줄까지 추가할 수 있어요.');
+        var no = (i + 1) + '번째 줄';
+        var m = /^[ \t]*/.exec(line)[0];
+        var hasTab = m.indexOf('\t') >= 0, hasSpace = m.indexOf(' ') >= 0;
+        if (hasTab && hasSpace) return fail(no + ': 들여쓰기에 탭과 공백을 섞어 쓸 수 없어요.');
+        var depth = 0;
+        if (m.length > 0) {
+          var kind = hasTab ? 'tab' : 'space';
+          if (unit === null) { unit = hasTab ? 1 : m.length; unitKind = kind; }
+          if (kind !== unitKind) return fail(no + ': 들여쓰기에 탭과 공백을 섞어 쓸 수 없어요.');
+          if (m.length % unit !== 0) return fail(no + ': 들여쓰기 칸 수가 맞지 않아요. 한 단계는 ' + (unitKind === 'tab' ? '탭 1개' : '공백 ' + unit + '칸') + '이에요.');
+          depth = m.length / unit;
+        }
+        if (nodes.length === 0 && depth !== 0) return fail(no + ': 첫 줄은 들여쓰기 없이 시작해 주세요.');
+        if (depth > prevDepth + 1) return fail(no + ': 들여쓰기가 한 번에 두 단계 이상 깊어졌어요.');
+        if (depth >= maxDepth) return fail(no + ': 들여쓰기가 단계 수보다 깊어요. 여기에는 ' + maxDepth + '단계까지 쓸 수 있어요.');
+        var n = cleanName(line.trim());
+        if (n.error) return fail(no + ': ' + n.error);
+        nodes.push({ name: n.value, depth: depth });
+        prevDepth = depth;
+      }
+      if (nodes.length === 0) return fail('폴더 이름을 한 줄에 하나씩 적어 주세요.');
+      return { ok: true, nodes: nodes };
+    }
+
+    // parentId가 null이면 1단계부터, 아니면 그 폴더 아래에 추가한다.
+    function addFolders(d, gameId, parentId, text) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var levels = g.levels.length;
+      if (levels === 0) return fail('먼저 단계를 추가해 주세요.');
+      var parent = null;
+      if (parentId) {
+        g.folders.forEach(function (f) { if (f.id === parentId) parent = f; });
+        if (!parent) return fail('폴더를 찾을 수 없어요.');
+      }
+      var startLevel = parent ? parent.level + 1 : 1;
+      if (startLevel > levels) return fail('이 폴더는 마지막 단계라 아래에 폴더를 추가할 수 없어요.');
+      var p = parseFolderTree(text, levels - startLevel + 1);
+      if (!p.ok) return p;
+      if (g.folders.length + p.nodes.length > LIMIT.folders) return fail('폴더는 한 게임에 ' + LIMIT.folders + '개까지예요.');
+      var used = allIds(d);
+      var stack = [];
+      p.nodes.forEach(function (node) {
+        var up = node.depth === 0 ? parent : stack[node.depth - 1];
+        var f = { id: makeId('fo', used), parentId: up ? up.id : null, level: startLevel + node.depth, name: node.name, off: [] };
+        g.folders.push(f);
+        stack[node.depth] = f;
+        stack.length = node.depth + 1;
+      });
+      return { ok: true, added: p.nodes.length };
+    }
+
+    function renameFolder(d, folderId, name) {
+      var loc = findFolder(d, folderId); if (!loc) return fail('폴더를 찾을 수 없어요.');
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      loc.folder.name = n.value;
+      return { ok: true };
+    }
+
+    // 폴더와 아래 폴더 전부를 복사한다 (끈 항목 포함, 완료 기록은 복사하지 않는다). 복사본은 원본 바로 뒤에 놓인다.
+    function cloneFolder(d, folderId) {
+      var loc = findFolder(d, folderId); if (!loc) return fail('폴더를 찾을 수 없어요.');
+      var g = loc.game;
+      var tree = subtree(g, folderId);
+      if (g.folders.length + tree.length > LIMIT.folders) return fail('폴더는 한 게임에 ' + LIMIT.folders + '개까지예요.');
+      var used = allIds(d);
+      var map = {};
+      tree.forEach(function (f) { map[f.id] = makeId('fo', used); });
+      var rootName = loc.folder.name.length > LIMIT.name - 3 ? loc.folder.name.slice(0, LIMIT.name - 3) : loc.folder.name;
+      var copies = tree.map(function (f) {
+        return {
+          id: map[f.id],
+          parentId: f.id === folderId ? f.parentId : map[f.parentId],
+          level: f.level,
+          name: f.id === folderId ? rootName + ' 복사' : f.name,
+          off: f.off.slice()
+        };
+      });
+      Array.prototype.splice.apply(g.folders, [loc.index + 1, 0].concat(copies));
+      return { ok: true, id: map[folderId], copied: copies.length };
+    }
+
+    // 옮길 수 있는 새 상위 폴더들: 바로 위 단계의 폴더 (지금 상위 폴더 포함)
+    function eligibleParents(d, folderId) {
+      var loc = findFolder(d, folderId);
+      if (!loc || loc.folder.level < 2) return [];
+      return loc.game.folders.filter(function (f) { return f.level === loc.folder.level - 1; });
+    }
+    function moveFolderTo(d, folderId, newParentId) {
+      var loc = findFolder(d, folderId); if (!loc) return fail('폴더를 찾을 수 없어요.');
+      if (loc.folder.level < 2) return fail('맨 위 단계의 폴더는 옮길 상위 폴더가 없어요.');
+      var ok = eligibleParents(d, folderId).some(function (f) { return f.id === newParentId; });
+      if (!ok) return fail('바로 위 단계의 폴더 안으로만 옮길 수 있어요.');
+      if (loc.folder.parentId === newParentId) return { ok: true, noop: true };
+      loc.folder.parentId = newParentId;
+      // 새 상위 폴더 안에서 맨 뒤에 놓는다
+      loc.game.folders.splice(loc.index, 1);
+      loc.game.folders.push(loc.folder);
+      return { ok: true };
+    }
+
+    function impactFolder(d, folderId) {
+      var loc = findFolder(d, folderId);
+      if (!loc) return { folders: 0, records: 0, groupRecords: 0 };
+      var tree = subtree(loc.game, folderId);
+      var c = recordCount(d, null, null, toSet(tree.map(function (f) { return f.id; })));
+      return { folders: tree.length, records: c.records, groupRecords: c.groupRecords };
+    }
+    function deleteFolder(d, folderId) {
+      var loc = findFolder(d, folderId); if (!loc) return fail('폴더를 찾을 수 없어요.');
+      var set = toSet(subtree(loc.game, folderId).map(function (f) { return f.id; }));
+      loc.game.folders = loc.game.folders.filter(function (f) { return !set[f.id]; });
+      d.records = d.records.filter(function (r) { return !(r.folderId != null && set[r.folderId]); });
+      d.groupRecords = d.groupRecords.filter(function (r) { return !(r.folderId != null && set[r.folderId]); });
+      return { ok: true };
+    }
+    function moveFolder(d, folderId, delta) {
+      var loc = findFolder(d, folderId); if (!loc) return fail('폴더를 찾을 수 없어요.');
+      var parentId = loc.folder.parentId;
+      return moveWithin(loc.game.folders, folderId, delta, function (f) { return f.parentId === parentId; });
+    }
+
+    // 게임의 폴더를 트리 순서(위 단계 먼저, 형제는 배열 순서)로. [{ folder, depth }]
+    function folderList(d, gameId) {
+      var g = findGame(d, gameId);
+      if (!g) return [];
+      var out = [];
+      function walk(parentId, depth) {
+        g.folders.forEach(function (f) {
+          if (f.parentId === parentId || (parentId === null && f.parentId == null)) {
+            out.push({ folder: f, depth: depth });
+            walk(f.id, depth + 1);
+          }
+        });
+      }
+      walk(null, 0);
+      return out;
+    }
+
+    // 폴더에서 끌 수 있는 묶음·숙제 목록. 범위(scope)가 이 폴더의 단계 이상인 묶음과 그 숙제만.
+    // [{ kind:'group'|'task', id, name, groupId, own, inheritedFrom }]  inheritedFrom: 위 폴더가 이미 끈 경우 그 폴더 이름
+    function offList(d, folderId) {
+      var loc = findFolder(d, folderId);
+      if (!loc) return [];
+      var byId = {};
+      loc.game.folders.forEach(function (f) { byId[f.id] = f; });
+      function inherited(itemId) {
+        var seen = {};
+        var id = loc.folder.parentId;
+        while (id != null && byId[id] && !seen[id]) {
+          seen[id] = true;
+          if (byId[id].off.indexOf(itemId) >= 0) return byId[id].name;
+          id = byId[id].parentId;
+        }
+        return null;
+      }
+      var rows = [];
+      groupsOf(d, loc.game.id).forEach(function (g) {
+        if (typeof g.scope !== 'number' || g.scope < loc.folder.level) return;
+        rows.push({ kind: 'group', id: g.id, name: g.name, groupId: g.id, own: loc.folder.off.indexOf(g.id) >= 0, inheritedFrom: inherited(g.id) });
+        d.tasks.forEach(function (t) {
+          if (t.groupId === g.id) rows.push({ kind: 'task', id: t.id, name: t.name, groupId: g.id, own: loc.folder.off.indexOf(t.id) >= 0, inheritedFrom: inherited(t.id) });
+        });
+      });
+      return rows;
+    }
+    // changes: { 항목id: true(끔) | false(켬) }. 한 번에 적용한다.
+    function setOff(d, folderId, changes) {
+      var loc = findFolder(d, folderId); if (!loc) return fail('폴더를 찾을 수 없어요.');
+      var allowed = toSet(offList(d, folderId).map(function (r) { return r.id; }));
+      var ids = Object.keys(changes);
+      for (var i = 0; i < ids.length; i++) if (!allowed[ids[i]]) return fail('이 폴더에서 끌 수 없는 항목이에요.');
+      var off = loc.folder.off.filter(function (x) { return changes[x] !== false; });
+      ids.forEach(function (id) { if (changes[id] === true && off.indexOf(id) < 0) off.push(id); });
+      loc.folder.off = off;
+      return { ok: true };
+    }
+
+    /* ----- 묶음 ----- */
+    function checkGroupFields(d, g, f) {
+      var n = cleanName(f.name); if (n.error) return { error: n.error };
+      if (!g.cycles.some(function (c) { return c.id === f.cycleId; })) {
+        return { error: g.cycles.length ? '리셋 주기를 골라 주세요.' : '먼저 리셋 주기를 추가해 주세요.' };
+      }
+      if (!(f.scope === 'game' || (typeof f.scope === 'number' && f.scope >= 1 && f.scope <= g.levels.length && Math.floor(f.scope) === f.scope))) {
+        return { error: '범위를 골라 주세요.' };
+      }
+      var req = f.required === undefined ? null : f.required;
+      if (!(req === null || (typeof req === 'number' && isFinite(req) && Math.floor(req) === req && req >= 1))) {
+        return { error: '필요 개수는 1 이상의 정수로 적어 주세요. 전부 해야 하면 "전부"를 고르세요.' };
+      }
+      return { value: { name: n.value, cycleId: f.cycleId, scope: f.scope, required: req, low: f.low === true } };
+    }
+
+    function addGroup(d, gameId, fields) {
+      var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
+      var c = checkGroupFields(d, g, fields); if (c.error) return fail(c.error);
+      var id = makeId('gr', allIds(d));
+      d.groups.push({ id: id, gameId: gameId, name: c.value.name, cycleId: c.value.cycleId, scope: c.value.scope, required: c.value.required, low: c.value.low });
+      return { ok: true, id: id };
+    }
+
+    // 이 묶음에 완료 기록이나 묶음 완료 기록이 하나라도 있는지
+    function groupHasRecords(d, groupId) {
+      var ids = {};
+      d.tasks.forEach(function (t) { if (t.groupId === groupId) ids[t.id] = true; });
+      return d.records.some(function (r) { return ids[r.taskId]; }) || d.groupRecords.some(function (r) { return r.groupId === groupId; });
+    }
+
+    // 주기나 범위를 바꾸면 이미 한 체크가 사라지거나 되살아나므로, 기록이 있는 묶음은 막는다 (3장 "묶음").
+    function updateGroup(d, groupId, fields) {
+      var grp = findGroup(d, groupId); if (!grp) return fail('묶음을 찾을 수 없어요.');
+      var g = findGame(d, grp.gameId);
+      var c = checkGroupFields(d, g, fields); if (c.error) return fail(c.error);
+      var hasRecords = groupHasRecords(d, groupId);
+      if (c.value.cycleId !== grp.cycleId && hasRecords) return fail('이미 체크한 기록이 있어서 주기를 바꿀 수 없어요. 주기 자체를 고치거나 새 묶음을 만드세요.');
+      if (c.value.scope !== grp.scope && hasRecords) return fail('이미 체크한 기록이 있어서 범위를 바꿀 수 없어요. 새 묶음을 만드세요.');
+      grp.name = c.value.name; grp.cycleId = c.value.cycleId; grp.scope = c.value.scope;
+      grp.required = c.value.required; grp.low = c.value.low;
+      return { ok: true };
+    }
+
+    function impactGroup(d, groupId) {
+      var tasks = d.tasks.filter(function (t) { return t.groupId === groupId; });
+      var c = recordCount(d, toSet(tasks.map(function (t) { return t.id; })), toSet([groupId]), null);
+      return { tasks: tasks.length, records: c.records, groupRecords: c.groupRecords };
+    }
+    function deleteGroup(d, groupId) {
+      var grp = findGroup(d, groupId); if (!grp) return fail('묶음을 찾을 수 없어요.');
+      var taskIds = d.tasks.filter(function (t) { return t.groupId === groupId; }).map(function (t) { return t.id; });
+      var set = toSet(taskIds);
+      d.records = d.records.filter(function (r) { return !set[r.taskId]; });
+      d.groupRecords = d.groupRecords.filter(function (r) { return r.groupId !== groupId; });
+      d.tasks = d.tasks.filter(function (t) { return t.groupId !== groupId; });
+      removeOffEntries(d, grp.gameId, taskIds.concat([groupId]));
+      d.groups = d.groups.filter(function (x) { return x.id !== groupId; });
+      return { ok: true };
+    }
+    function moveGroup(d, groupId, delta) {
+      var grp = findGroup(d, groupId); if (!grp) return fail('묶음을 찾을 수 없어요.');
+      return moveWithin(d.groups, groupId, delta, function (x) { return x.gameId === grp.gameId; });
+    }
+
+    /* ----- 숙제 ----- */
+    // 한 줄에 하나씩. 빈 줄은 무시하고 앞뒤 공백은 뗀다. at은 만든 시각(Reset.now()).
+    function addTasks(d, groupId, text, at) {
+      var grp = findGroup(d, groupId); if (!grp) return fail('묶음을 찾을 수 없어요.');
+      if (typeof text !== 'string') return fail('숙제 이름을 한 줄에 하나씩 적어 주세요.');
+      var lines = text.split(/\r\n|\r|\n/);
+      var names = [];
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === '') continue;
+        if (names.length >= OPS_LIMIT.taskLines) return fail('한 번에 ' + OPS_LIMIT.taskLines + '줄까지 추가할 수 있어요.');
+        var n = cleanName(lines[i]);
+        if (n.error) return fail((i + 1) + '번째 줄: ' + n.error);
+        names.push(n.value);
+      }
+      if (names.length === 0) return fail('숙제 이름을 한 줄에 하나씩 적어 주세요.');
+      var created = global.Reset.formatIso(at);
+      var used = allIds(d);
+      names.forEach(function (name) {
+        d.tasks.push({ id: makeId('tk', used), groupId: groupId, name: name, low: false, createdAt: created });
+      });
+      return { ok: true, added: names.length };
+    }
+    function renameTask(d, taskId, name) {
+      var t = findTask(d, taskId); if (!t) return fail('숙제를 찾을 수 없어요.');
+      var n = cleanName(name); if (n.error) return fail(n.error);
+      t.name = n.value;
+      return { ok: true };
+    }
+    function setTaskLow(d, taskId, low) {
+      var t = findTask(d, taskId); if (!t) return fail('숙제를 찾을 수 없어요.');
+      t.low = low === true;
+      return { ok: true };
+    }
+    function impactTask(d, taskId) {
+      var c = recordCount(d, toSet([taskId]), null, null);
+      return { records: c.records };
+    }
+    function deleteTask(d, taskId) {
+      var t = findTask(d, taskId); if (!t) return fail('숙제를 찾을 수 없어요.');
+      var grp = findGroup(d, t.groupId);
+      d.records = d.records.filter(function (r) { return r.taskId !== taskId; });
+      d.tasks = d.tasks.filter(function (x) { return x.id !== taskId; });
+      if (grp) removeOffEntries(d, grp.gameId, [taskId]);
+      return { ok: true };
+    }
+    function moveTask(d, taskId, delta) {
+      var t = findTask(d, taskId); if (!t) return fail('숙제를 찾을 수 없어요.');
+      return moveWithin(d.tasks, taskId, delta, function (x) { return x.groupId === t.groupId; });
+    }
+
+    return {
+      addGame: addGame, renameGame: renameGame, impactGame: impactGame, deleteGame: deleteGame, moveGame: moveGame,
+      addCycle: addCycle, updateCycle: updateCycle, deleteCycle: deleteCycle,
+      addLevelBelow: addLevelBelow, addLevelAbove: addLevelAbove, renameLevel: renameLevel, impactLevel: impactLevel, deleteLevel: deleteLevel,
+      parseFolderTree: parseFolderTree, addFolders: addFolders, renameFolder: renameFolder, cloneFolder: cloneFolder,
+      eligibleParents: eligibleParents, moveFolderTo: moveFolderTo, impactFolder: impactFolder, deleteFolder: deleteFolder,
+      moveFolder: moveFolder, folderList: folderList, offList: offList, setOff: setOff,
+      addGroup: addGroup, updateGroup: updateGroup, groupHasRecords: groupHasRecords, impactGroup: impactGroup, deleteGroup: deleteGroup, moveGroup: moveGroup,
+      addTasks: addTasks, renameTask: renameTask, setTaskLow: setTaskLow, impactTask: impactTask, deleteTask: deleteTask, moveTask: moveTask
+    };
+  })();
+
   /* ---------- 저장소 인스턴스 ---------- */
 
   function create(storage) {
@@ -462,7 +1051,22 @@
       if (state.status === 'empty') state.status = 'ok';
       return { ok: true, data: mem };
     }
-    var NOOP = {};
+
+    // Store.ops의 변경 하나를 적용한다: apply(function (d) { return Store.ops.xxx(d, …); }).
+    // ops가 { ok:false }를 돌려주면 저장하지 않고 그 오류를 그대로 돌려준다. { noop:true }면 저장하지 않는다.
+    function apply(fn) {
+      var r = null;
+      var u = update(function (d) {
+        r = fn(d);
+        if (!r || !r.ok || r.noop) return NOOP;
+      });
+      if (!u.ok) return { ok: false, error: u.error, errors: u.errors };
+      if (!r || !r.ok) return r || { ok: false, error: '변경하지 못했어요.' };
+      var out = {};
+      Object.keys(r).forEach(function (k) { out[k] = r[k]; });
+      out.data = u.data;
+      return out;
+    }
 
     // 완료 기록을 쌓는다. 한 번 호출 = 한 번 저장 (전부 저장되거나 하나도 안 된다).
     function addRecords(records, groupRecords) {
@@ -573,22 +1177,13 @@
 
     // 새 id. 접두어 + 시간(36진수) + 난수. 이미 있는 id와 겹치지 않는다.
     function newId(prefix) {
-      var used = Object.create(null);
-      function add(o) { if (o && typeof o.id === 'string') used[o.id] = true; }
-      var d = get();
-      d.games.forEach(function (g) { add(g); g.cycles.forEach(add); g.folders.forEach(add); });
-      d.groups.forEach(add); d.tasks.forEach(add); d.presets.forEach(add);
-      var id;
-      do {
-        id = (prefix || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      } while (used[id]);
-      return id;
+      return makeId(prefix, allIds(get()));
     }
 
     load();
 
     return {
-      load: load, status: status, get: get, update: update,
+      load: load, status: status, get: get, update: update, apply: apply,
       addRecords: addRecords, removeRecordsInPeriod: removeRecordsInPeriod,
       exportJson: exportJson, importJson: importJson,
       rawText: rawText, startFresh: startFresh, newId: newId
@@ -600,6 +1195,8 @@
 
   var api = create(defaultStorage);
   api.create = create;
+  api.ops = ops;
+  api.NOOP = NOOP;
   api.validateData = validateData;
   api.KEY = KEY;
   api.BROKEN_KEY = BROKEN_KEY;

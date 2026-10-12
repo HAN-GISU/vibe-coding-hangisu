@@ -1039,6 +1039,407 @@
         } finally { Math.random = origRandom; Date.now = origNow; }
       }, [true, true]);
     });
+
+    /* ---------- Store.ops (3단계 설정 화면의 변경 규칙) ---------- */
+    var O = ST.ops;
+    var AT = D(10, 15, 5, 30);
+    function mut(fn, base) { var d = clone(base || sample()); var r = fn(d); return { r: r, d: d, valid: ST.validateData(d) }; }
+    function same2(d, fn) { var before = JSON.stringify(d); var r = fn(d); return [r.ok, JSON.stringify(d) === before]; }
+    function ids(list) { return list.map(function (x) { return x.id; }); }
+    // 3단계(A › B › C)짜리 자료
+    function tri() {
+      return {
+        version: 1,
+        games: [{ id: 'g', name: 'g', cycles: [{ id: 'c', name: 'c', type: 'daily', time: '05:00' }], levels: ['A', 'B', 'C'], folders: [
+          { id: 'a1', parentId: null, level: 1, name: 'a1', off: [] },
+          { id: 'a2', parentId: null, level: 1, name: 'a2', off: ['t1'] },
+          { id: 'b1', parentId: 'a1', level: 2, name: 'b1', off: [] },
+          { id: 'c1', parentId: 'b1', level: 3, name: 'c1', off: [] }
+        ] }],
+        groups: [{ id: 'gr', gameId: 'g', name: 'gr', cycleId: 'c', scope: 3, required: null, low: false }],
+        tasks: [{ id: 't1', groupId: 'gr', name: 't1', low: false, createdAt: '2026-10-01T00:00:00' }],
+        records: [{ taskId: 't1', folderId: 'c1', doneAt: '2026-10-14T10:00:00' }],
+        groupRecords: [], presets: []
+      };
+    }
+
+    suite('시계 (msUntilNextSecond)', function () {
+      eq('04:59:58.000 → 다음 초(59초)가 되는 1001ms 뒤', function () { return R.msUntilNextSecond(D(10, 15, 4, 59, 58)); }, 1001);
+      eq('.250 → 751ms 뒤', function () { return R.msUntilNextSecond(new Date(2026, 9, 15, 4, 59, 58, 250)); }, 751);
+      eq('.999 → 2ms 뒤', function () { return R.msUntilNextSecond(new Date(2026, 9, 15, 4, 59, 58, 999)); }, 2);
+    });
+
+    suite('Store.apply: ops를 한 번의 저장으로', function () {
+      eq('성공하면 저장하고 ops의 결과 값(id)과 새 스냅샷을 돌려준다', function () {
+        var x = storeWith(sample()); var r = x.st.apply(function (d) { return O.addGame(d, '로스트아크'); });
+        return [r.ok, typeof r.id, r.data === x.st.get(), JSON.parse(x.fs.items[KEY]).games.length, r.id === x.st.get().games[1].id];
+      }, [true, 'string', true, 2, true]);
+      eq('ops가 거부하면 저장하지 않고 그 오류 문구를 돌려준다', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY];
+        var r = x.st.apply(function (d) { return O.addGame(d, '  '); });
+        return [r.ok, r.error, x.fs.items[KEY] === raw, x.fs.setCalls];
+      }, [false, '이름을 입력해 주세요.', true, 0]);
+      eq('noop이면 저장하지 않는다 (맨 위 게임을 위로)', function () {
+        var x = storeWith(sample()); var r = x.st.apply(function (d) { return O.moveGame(d, 'gm1', -1); });
+        return [r.ok, x.fs.setCalls];
+      }, [true, 0]);
+      eq('ops가 성공했어도 검증에 실패하면 저장하지 않는다', function () {
+        var x = storeWith(sample()); var raw = x.fs.items[KEY];
+        var r = x.st.apply(function (d) { d.groups[0].required = 0; return { ok: true }; });
+        return [r.ok, r.error.indexOf('필요 개수') >= 0, x.fs.items[KEY] === raw];
+      }, [false, true, true]);
+      eq('손상 상태에서는 거부한다', function () { var fs = fake(); fs.items[KEY] = '{깨진'; var st = ST.create(fs); return st.apply(function (d) { return O.addGame(d, 'x'); }).ok; }, false);
+    });
+
+    suite('ops: 게임', function () {
+      eq('게임 추가: 비어 있는 게임이 생기고 이름은 앞뒤 공백이 떨어진다', function () {
+        var m = mut(function (d) { return O.addGame(d, '  작혼  '); });
+        var g = m.d.games[1];
+        return [m.r.ok, g.name, g.id.indexOf('gm_') === 0, g.cycles, g.levels, g.folders, m.valid.ok];
+      }, [true, '작혼', true, [], [], [], true]);
+      eq('게임 추가: 빈 이름·101자 이름은 거부하고 draft가 그대로', function () {
+        var d = sample(); return [same2(d, function (x) { return O.addGame(x, '   '); }), same2(d, function (x) { return O.addGame(x, new Array(102).join('가')); })];
+      }, [[false, true], [false, true]]);
+      eq('이름 바꾸기', function () { var m = mut(function (d) { return O.renameGame(d, 'gm1', ' 새 이름 '); }); return [m.r.ok, m.d.games[0].name]; }, [true, '새 이름']);
+      eq('이름 바꾸기: 없는 게임·빈 이름은 거부', function () { var d = sample(); return [same2(d, function (x) { return O.renameGame(x, 'nope', 'a'); }), same2(d, function (x) { return O.renameGame(x, 'gm1', ''); })]; }, [[false, true], [false, true]]);
+      eq('영향 조회: 주기 2, 단계 2, 폴더 3, 묶음 3, 숙제 5, 기록 1, 묶음 기록 1', function () { return O.impactGame(sample(), 'gm1'); }, { cycles: 2, levels: 2, folders: 3, groups: 3, tasks: 5, records: 1, groupRecords: 1 });
+      eq('삭제: 그 게임의 묶음·숙제·기록·묶음 기록이 같이 지워지고 다른 게임과 내 프리셋은 그대로', function () {
+        var base = sample();
+        base.games.push({ id: 'gm2', name: '작혼', cycles: [{ id: 'c2', name: '일일', type: 'daily', time: '06:00' }], levels: [], folders: [] });
+        base.groups.push({ id: 'gq', gameId: 'gm2', name: '일일', cycleId: 'c2', scope: 'game', required: null, low: false });
+        base.tasks.push({ id: 'tq', groupId: 'gq', name: '임무', low: false, createdAt: '2026-10-01T00:00:00' });
+        base.records.push({ taskId: 'tq', folderId: null, doneAt: '2026-10-14T10:00:00' });
+        base.groupRecords.push({ groupId: 'gq', folderId: null, doneAt: '2026-10-14T10:00:00' });
+        var m = mut(function (d) { return O.deleteGame(d, 'gm1'); }, base);
+        return [m.r.ok, ids(m.d.games), ids(m.d.groups), ids(m.d.tasks), m.d.records.length, m.d.groupRecords.length, m.d.presets.length, m.valid.ok];
+      }, [true, ['gm2'], ['gq'], ['tq'], 1, 1, 1, true]);
+      eq('삭제: 없는 게임은 거부', function () { return same2(sample(), function (d) { return O.deleteGame(d, 'nope'); }); }, [false, true]);
+      eq('순서 바꾸기: 아래로 한 칸, 맨 아래에서 더 내리면 noop', function () {
+        var base = sample(); base.games.push({ id: 'gm2', name: '작혼', cycles: [], levels: [], folders: [] });
+        var m = mut(function (d) { return O.moveGame(d, 'gm1', 1); }, base);
+        var edge = mut(function (d) { return O.moveGame(d, 'gm2', 1); }, base);
+        return [ids(m.d.games), edge.r.noop === true, ids(edge.d.games)];
+      }, [['gm2', 'gm1'], true, ['gm1', 'gm2']]);
+    });
+
+    suite('ops: 리셋 주기', function () {
+      var DAILY = { name: '일일', type: 'daily', time: '05:00' };
+      eq('추가: 새 주기가 생기고 검증을 통과한다 (carry 없음)', function () {
+        var m = mut(function (d) { return O.addCycle(d, 'gm1', { name: '월간', type: 'monthly', date: 1, time: '00:00' }); });
+        var c = m.d.games[0].cycles[2];
+        return [m.r.ok, c.id.indexOf('cy_') === 0, c.type, c.date, 'carry' in c, m.valid.ok];
+      }, [true, true, 'monthly', 1, false, true]);
+      eq('추가: 간격 주기는 일·시간·분을 모두 담는다', function () {
+        var m = mut(function (d) { return O.addCycle(d, 'gm1', { name: '6시간', type: 'interval', anchor: '2026-10-12T05:30', every: { hours: 6 } }); });
+        return m.d.games[0].cycles[2].every;
+      }, { days: 0, hours: 6, minutes: 0 });
+      eq('추가: 시각이 잘못되면 reset의 안내 문구로 거부하고 draft가 그대로', function () {
+        var d = sample(); var before = JSON.stringify(d); var r = O.addCycle(d, 'gm1', { name: 'x', type: 'daily', time: '25:00' });
+        return [r.ok, r.error.indexOf('시각은') >= 0, JSON.stringify(d) === before];
+      }, [false, true, true]);
+      eq('추가: 간격이 0이면 거부', function () { var r = O.addCycle(sample(), 'gm1', { name: 'x', type: 'interval', anchor: '2026-10-12T05:30', every: {} }); return [r.ok, r.error.indexOf('1분 이상') >= 0]; }, [false, true]);
+      eq('추가: 이름이 없거나 게임이 없으면 거부', function () { var d = sample(); return [same2(d, function (x) { return O.addCycle(x, 'gm1', { name: '', type: 'once' }); }), same2(d, function (x) { return O.addCycle(x, 'nope', { name: 'a', type: 'once' }); })]; }, [[false, true], [false, true]]);
+
+      eq('수정(시각 변경): changeCycle을 거쳐 carry가 붙고, 이미 한 체크가 유지된다 (carry가 없으면 사라지는 경우)', function () {
+        var base = sample(); base.records.push({ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-15T05:10:00' });
+        var m = mut(function (d) { return O.updateCycle(d, 'gm1', 'cd', { name: '일일', type: 'daily', time: '05:20' }, AT); }, base);
+        var cyc = m.d.games[0].cycles[0];
+        var rs = m.d.records;
+        function done(c) { return R.isTaskDone({ cycle: c, taskId: 'tk1', folderId: 'fc1', records: rs, at: AT }); }
+        return [m.r.changed, cyc.carry, done(cyc), done({ type: 'daily', time: '05:20' }), m.valid.ok];
+      }, [true, { since: '2026-10-15T05:00:00', until: '2026-10-16T05:20:00' }, true, false, true]);
+      eq('수정(이름만): carry를 그대로 둔다 (changed:false)', function () {
+        var base = sample(); base.games[0].cycles[0] = R.changeCycle(base.games[0].cycles[0], { id: 'cd', name: '일일', type: 'daily', time: '05:20' }, AT);
+        var carry = JSON.stringify(base.games[0].cycles[0].carry);
+        var m = mut(function (d) { return O.updateCycle(d, 'gm1', 'cd', { name: '새 이름', type: 'daily', time: '05:20' }, D(10, 20, 12, 0)); }, base);
+        return [m.r.changed, m.d.games[0].cycles[0].name, JSON.stringify(m.d.games[0].cycles[0].carry) === carry];
+      }, [false, '새 이름', true]);
+      eq('수정: 기준 시각을 초까지 다르게 써도 같은 정의면 바뀐 게 아니다', function () {
+        var base = sample(); base.games[0].cycles.push({ id: 'ci', name: '간격', type: 'interval', anchor: '2026-10-01T05:00', every: { days: 14, hours: 0, minutes: 0 } });
+        var m = mut(function (d) { return O.updateCycle(d, 'gm1', 'ci', { name: '간격', type: 'interval', anchor: '2026-10-01T05:00:00', every: { days: 14 } }, AT); }, base);
+        return [m.r.changed, 'carry' in m.d.games[0].cycles[2]];
+      }, [false, false]);
+      eq('수정(종류 변경): 이전 종류의 필드(time, anchor)가 남지 않는다', function () {
+        var toWeekly = mut(function (d) { return O.updateCycle(d, 'gm1', 'cd', { name: '주', type: 'weekly', day: 4, time: '06:00' }, AT); }).d.games[0].cycles[0];
+        var base = sample(); base.games[0].cycles[0] = { id: 'cd', name: '일일', type: 'daily', time: '05:00' };
+        var toInterval = mut(function (d) { return O.updateCycle(d, 'gm1', 'cd', { name: '간격', type: 'interval', anchor: '2026-10-01T05:00', every: { hours: 6 } }, AT); }, base).d.games[0].cycles[0];
+        return [Object.keys(toWeekly).sort(), Object.keys(toInterval).sort()];
+      }, [['carry', 'day', 'id', 'name', 'time', 'type'], ['anchor', 'carry', 'every', 'id', 'name', 'type']]);
+      eq('수정(1회로): until 없는 carry({ since })가 붙는다', function () {
+        var m = mut(function (d) { return O.updateCycle(d, 'gm1', 'cd', { name: '일일', type: 'once' }, AT); });
+        return [m.d.games[0].cycles[0].carry, m.valid.ok];
+      }, [{ since: '2026-10-15T05:00:00' }, true]);
+      eq('수정: 잘못된 값은 거부하고 draft가 그대로', function () { return same2(sample(), function (d) { return O.updateCycle(d, 'gm1', 'cd', { name: '일일', type: 'daily', time: '5시' }, AT); }); }, [false, true]);
+      eq('수정: 없는 주기·게임은 거부', function () { var d = sample(); return [same2(d, function (x) { return O.updateCycle(x, 'gm1', 'nope', DAILY, AT); }), same2(d, function (x) { return O.updateCycle(x, 'nope', 'cd', DAILY, AT); })]; }, [[false, true], [false, true]]);
+
+      eq('삭제: 쓰는 묶음이 있으면 거부하고 그 묶음 이름을 알려준다', function () {
+        var d = sample(); var before = JSON.stringify(d); var r = O.deleteCycle(d, 'gm1', 'cd');
+        return [r.ok, r.error.indexOf('"일일 퀘스트"') >= 0, JSON.stringify(d) === before];
+      }, [false, true, true]);
+      eq('삭제: 쓰는 묶음이 없으면 지운다', function () {
+        var m = mut(function (d) { d.games[0].cycles.push({ id: 'cz', name: '안 씀', type: 'once' }); return O.deleteCycle(d, 'gm1', 'cz'); });
+        return [m.r.ok, ids(m.d.games[0].cycles), m.valid.ok];
+      }, [true, ['cd', 'cw'], true]);
+      eq('삭제: 없는 주기는 거부', function () { return same2(sample(), function (d) { return O.deleteCycle(d, 'gm1', 'nope'); }); }, [false, true]);
+    });
+
+    suite('ops: 단계', function () {
+      eq('아래로 추가: 단계만 늘고 폴더와 묶음은 그대로', function () {
+        var base = sample(); var m = mut(function (d) { return O.addLevelBelow(d, 'gm1', '프리셋 장비'); });
+        return [m.d.games[0].levels, JSON.stringify(m.d.games[0].folders) === JSON.stringify(base.games[0].folders), JSON.stringify(m.d.groups) === JSON.stringify(base.groups), m.valid.ok];
+      }, [['계정', '캐릭터', '프리셋 장비'], true, true, true]);
+      eq('아래로 추가: 단계는 10개까지', function () { var d = sample(); d.games[0].levels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']; d.games[0].folders = []; d.groups = d.groups.filter(function (g) { return g.scope === 'game'; }); d.tasks = d.tasks.filter(function (t) { return t.groupId === 'gr3'; }); d.records = []; d.groupRecords = []; return same2(d, function (x) { return O.addLevelBelow(x, 'gm1', '11'); }); }, [false, true]);
+      eq('위로 추가: 기존 폴더가 새 맨 위 폴더 "기본" 하나 안으로 들어가고 단계 번호와 범위가 하나씩 밀린다', function () {
+        var m = mut(function (d) { return O.addLevelAbove(d, 'gm1', '서버'); });
+        var g = m.d.games[0]; var top = g.folders[0];
+        function f(id) { return g.folders.filter(function (x) { return x.id === id; })[0]; }
+        return [g.levels, top.name, top.level, top.parentId, f('fa1').level, f('fa1').parentId === top.id, f('fc1').level, f('fc1').parentId, m.d.groups.map(function (x) { return x.scope; }), m.valid.ok];
+      }, [['서버', '계정', '캐릭터'], '기본', 1, null, 2, true, 3, 'fa1', [3, 3, 'game'], true]);
+      eq('위로 추가: 기존 끈 항목과 완료 기록이 그대로이고 위 폴더가 끈 것이 아래에 계속 적용된다', function () {
+        var m = mut(function (d) { return O.addLevelAbove(d, 'gm1', '서버'); });
+        return [Reset_isOff(m.d, 'fc1', 'tk4'), m.d.records.length, m.d.groupRecords.length];
+      }, [true, 1, 1]);
+      function Reset_isOff(d, folderId, itemId) { return R.isOff(d.games[0].folders, folderId, itemId); }
+      eq('위로 추가: 폴더가 없으면 "기본" 폴더를 만들지 않는다 (범위만 밀린다)', function () {
+        var m = mut(function (d) { d.games[0].folders = []; d.records = d.records.filter(function (r) { return r.folderId === null; }); d.groupRecords = []; return O.addLevelAbove(d, 'gm1', '서버'); });
+        return [m.d.games[0].levels, m.d.games[0].folders.length, m.d.groups.map(function (x) { return x.scope; })];
+      }, [['서버', '계정', '캐릭터'], 0, [3, 3, 'game']]);
+      eq('위로 추가: 단계가 하나도 없는 게임에서는 첫 단계가 된다', function () { var m = mut(function (d) { return O.addGame(d, '새'); }); var id = m.d.games[1].id; var r = O.addLevelAbove(m.d, id, '계정'); return [r.ok, m.d.games[1].levels, m.d.games[1].folders.length]; }, [true, ['계정'], 0]);
+      eq('위로 추가: 맨 위 폴더 이름을 정할 수 있고, 비우면 거부', function () {
+        var named = mut(function (d) { return O.addLevelAbove(d, 'gm1', '서버', '기본 서버'); }).d.games[0].folders[0].name;
+        return [named, same2(sample(), function (d) { return O.addLevelAbove(d, 'gm1', '서버', ' '); })];
+      }, ['기본 서버', [false, true]]);
+      eq('이름 바꾸기: 단계 이름, 범위 밖 단계 번호는 거부', function () {
+        var m = mut(function (d) { return O.renameLevel(d, 'gm1', 2, '캐릭터명'); }); var d = sample();
+        return [m.d.games[0].levels, same2(d, function (x) { return O.renameLevel(x, 'gm1', 3, 'a'); }), same2(d, function (x) { return O.renameLevel(x, 'gm1', 0, 'a'); })];
+      }, [['계정', '캐릭터명'], [false, true], [false, true]]);
+      eq('영향 조회: 2단계에 폴더 2개, 범위로 쓰는 묶음 2개', function () { var i = O.impactLevel(sample(), 'gm1', 2); return [i.folders, ids(i.groups)]; }, [2, ['gr1', 'gr2']]);
+      eq('삭제 거부: 폴더가 있는 단계', function () { var d = sample(); var r = O.deleteLevel(d, 'gm1', 2); return [r.ok, r.error.indexOf('폴더가 2개') >= 0]; }, [false, true]);
+      eq('삭제 거부: 폴더는 없고 그 단계를 범위로 쓰는 묶음이 있는 단계', function () {
+        var d = sample(); d.games[0].folders = [d.games[0].folders[0]]; d.records = []; d.groupRecords = [];
+        var r = O.deleteLevel(d, 'gm1', 2); return [r.ok, r.error.indexOf('묶음이 2개') >= 0, r.error.indexOf('폴더가') >= 0];
+      }, [false, true, false]);
+      eq('삭제 거부는 draft를 바꾸지 않는다', function () { return same2(sample(), function (d) { return O.deleteLevel(d, 'gm1', 1); }); }, [false, true]);
+      eq('삭제: 가운데 단계를 지우면 아래 단계의 범위 번호가 하나씩 당겨진다', function () {
+        var d = tri(); d.games[0].folders = []; d.records = [];
+        d.groups.push({ id: 'g1', gameId: 'g', name: '계정 묶음', cycleId: 'c', scope: 1, required: null, low: false });
+        var r = O.deleteLevel(d, 'g', 2);
+        return [r.ok, d.games[0].levels, d.groups.map(function (x) { return x.scope; }), ST.validateData(d).ok];
+      }, [true, ['A', 'C'], [2, 1], true]);
+      eq('삭제: 아래 단계를 지우면 위 단계는 그대로', function () { var d = tri(); d.games[0].folders = d.games[0].folders.filter(function (f) { return f.level < 3; }); d.records = []; d.groups[0].scope = 'game'; var r = O.deleteLevel(d, 'g', 3); return [r.ok, d.games[0].levels, d.games[0].folders.length]; }, [true, ['A', 'B'], 3]);
+      eq('삭제: 없는 단계 번호는 거부', function () { return same2(sample(), function (d) { return O.deleteLevel(d, 'gm1', 5); }); }, [false, true]);
+    });
+
+    suite('ops: 폴더 여러 개 추가 (들여쓰기)', function () {
+      var EX = '본계정\n  캐릭터1\n  캐릭터2\n부계정\n  캐릭터3';
+      function p(text, depth) { var r = O.parseFolderTree(text, depth); return r.ok ? r.nodes.map(function (n) { return n.name + ':' + n.depth; }) : r.error; }
+      eq('CLAUDE.md 예시 그대로 읽는다', function () { return p(EX, 2); }, ['본계정:0', '캐릭터1:1', '캐릭터2:1', '부계정:0', '캐릭터3:1']);
+      eq('탭 들여쓰기', function () { return p('a\n\tb\n\t\tc', 3); }, ['a:0', 'b:1', 'c:2']);
+      eq('공백 4칸 단위', function () { return p('a\n    b\n        c', 3); }, ['a:0', 'b:1', 'c:2']);
+      eq('빈 줄은 무시하고 이름의 앞뒤 공백은 뗀다', function () { return p('\n  \n본계정  \n\n  캐릭터1\n', 2); }, ['본계정:0', '캐릭터1:1']);
+      eq('윈도우 줄바꿈(CRLF)도 읽는다', function () { return p('a\r\n  b', 2); }, ['a:0', 'b:1']);
+      eq('들여쓰기가 단계 수보다 깊으면 줄 번호와 함께 거부 (빈 줄도 번호에 센다)', function () { var e = p('a\n\n  b\n    c', 2); return [e.indexOf('4번째 줄') === 0, e.indexOf('단계 수보다 깊어요') >= 0, e.indexOf('2단계까지') >= 0]; }, [true, true, true]);
+      eq('한 번에 두 단계 이상 깊어지면 거부', function () { var e = p('a\n  b\n      d', 5); return [e.indexOf('3번째 줄') === 0, e.indexOf('두 단계') >= 0]; }, [true, true]);
+      eq('들여쓰기 칸 수가 단위의 배수가 아니면 거부', function () { var e = p('a\n  b\n   c', 5); return [e.indexOf('3번째 줄') === 0, e.indexOf('칸 수가 맞지 않아요') >= 0]; }, [true, true]);
+      eq('한 줄 안에서 탭과 공백을 섞으면 거부', function () { return p('a\n \tb', 3).indexOf('섞어 쓸 수 없어요') >= 0; }, true);
+      eq('줄마다 탭과 공백을 바꿔 쓰면 거부', function () { return p('a\n\tb\n  c', 3).indexOf('섞어 쓸 수 없어요') >= 0; }, true);
+      eq('첫 줄이 들여쓰기로 시작하면 거부', function () { return p('  a\nb', 3).indexOf('첫 줄') >= 0; }, true);
+      eq('비었거나 공백뿐이면 거부', function () { return [p('', 2), p(' \n\t\n', 2)].map(function (e) { return e.indexOf('한 줄에 하나씩') >= 0; }); }, [true, true]);
+      eq('이름이 101자면 줄 번호와 함께 거부', function () { var e = p('a\n' + new Array(102).join('가'), 2); return [e.indexOf('2번째 줄') === 0, e.indexOf('100자') >= 0]; }, [true, true]);
+      eq('501줄이면 거부, 500줄은 통과', function () { function many(n) { var a = []; for (var i = 0; i < n; i++) a.push('f' + i); return a.join('\n'); } return [p(many(501), 1).indexOf('500줄') >= 0, Array.isArray(p(many(500), 1))]; }, [true, true]);
+      eq('문자열이 아니면 거부', function () { return O.parseFolderTree(null, 2).ok; }, false);
+
+      eq('게임 맨 위에 추가: 단계·상위 폴더가 예시대로 이어진다', function () {
+        var m = mut(function (d) { return O.addFolders(d, 'gm1', null, EX); });
+        var added = m.d.games[0].folders.slice(3);
+        var byName = {}; added.forEach(function (f) { byName[f.name] = f; });
+        return [m.r.added, added.map(function (f) { return f.level; }), byName['캐릭터1'].parentId === byName['본계정'].id, byName['캐릭터2'].parentId === byName['본계정'].id, byName['캐릭터3'].parentId === byName['부계정'].id, byName['부계정'].parentId, added.every(function (f) { return f.off.length === 0; }), m.valid.ok];
+      }, [5, [1, 2, 2, 1, 2], true, true, true, null, true, true]);
+      eq('폴더 아래에 추가: 그 폴더 바로 아래 단계로 들어간다', function () {
+        var m = mut(function (d) { return O.addFolders(d, 'gm1', 'fa1', 'x\ny'); });
+        var added = m.d.games[0].folders.slice(3);
+        return [added.map(function (f) { return f.parentId + '/' + f.level + '/' + f.name; }), m.valid.ok];
+      }, [['fa1/2/x', 'fa1/2/y'], true]);
+      eq('폴더 아래에 추가: 남은 단계보다 깊게 쓰면 거부 (여기에는 1단계까지)', function () { var r = O.addFolders(sample(), 'gm1', 'fa1', 'x\n  y'); return [r.ok, r.error.indexOf('1단계까지') >= 0]; }, [false, true]);
+      eq('마지막 단계의 폴더 아래에는 추가할 수 없다', function () { var r = O.addFolders(sample(), 'gm1', 'fc1', 'x'); return [r.ok, r.error.indexOf('마지막 단계') >= 0]; }, [false, true]);
+      eq('단계가 없는 게임에는 추가할 수 없다 ("먼저 단계를 추가")', function () { var d = sample(); d.games.push({ id: 'gm2', name: '작혼', cycles: [], levels: [], folders: [] }); var r = O.addFolders(d, 'gm2', null, 'x'); return [r.ok, r.error.indexOf('먼저 단계') >= 0]; }, [false, true]);
+      eq('없는 게임·폴더는 거부, 입력이 잘못되면 draft가 그대로', function () { var d = sample(); return [same2(d, function (x) { return O.addFolders(x, 'nope', null, 'a'); }), same2(d, function (x) { return O.addFolders(x, 'gm1', 'nope', 'a'); }), same2(d, function (x) { return O.addFolders(x, 'gm1', null, 'a\n  b\n    c'); })]; }, [[false, true], [false, true], [false, true]]);
+      eq('폴더는 한 게임에 2000개까지 (1993개가 있을 때 7개는 통과, 8개는 거부)', function () {
+        var d = sample(); for (var i = 0; i < 1990; i++) d.games[0].folders.push({ id: 'x' + i, parentId: null, level: 1, name: 'x' + i, off: [] });
+        function names(n) { var a = []; for (var j = 0; j < n; j++) a.push('n' + j); return a.join('\n'); }
+        return [O.addFolders(clone(d), 'gm1', null, names(7)).ok, O.addFolders(clone(d), 'gm1', null, names(8)).ok];
+      }, [true, false]);
+      eq('새 폴더는 그 단계 묶음을 자동으로 갖고, 위 폴더가 끈 것도 이어받는다', function () {
+        var m = mut(function (d) { return O.addFolders(d, 'gm1', 'fa1', '새 캐릭터'); });
+        var g = m.d.games[0]; var added = g.folders[g.folders.length - 1];
+        return [R.foldersForGroup(m.d.groups[0], g.folders).map(function (f) { return f.id; }).indexOf(added.id) >= 0, R.isOff(g.folders, added.id, 'tk4')];
+      }, [true, true]);
+    });
+
+    suite('ops: 폴더 이름·복제·이동·삭제·순서·끄기', function () {
+      eq('이름 바꾸기', function () { var m = mut(function (d) { return O.renameFolder(d, 'fc1', ' 새 '); }); return m.d.games[0].folders[1].name; }, '새');
+      eq('이름 바꾸기: 없는 폴더·빈 이름은 거부', function () { var d = sample(); return [same2(d, function (x) { return O.renameFolder(x, 'nope', 'a'); }), same2(d, function (x) { return O.renameFolder(x, 'fc1', ''); })]; }, [[false, true], [false, true]]);
+
+      eq('복제(계정): 아래 폴더까지 3개가 새 id로 복사되고 원본 바로 뒤에 놓인다', function () {
+        var m = mut(function (d) { return O.cloneFolder(d, 'fa1'); });
+        var fs = m.d.games[0].folders; var root = fs[1];
+        return [m.r.copied, fs.length, root.name, root.parentId, root.level, fs[2].parentId === root.id, fs[3].parentId === root.id, ['fa1', 'fc1', 'fc2'].indexOf(root.id), m.valid.ok];
+      }, [3, 6, '본계정 복사', null, 1, true, true, -1, true]);
+      eq('복제: 끈 항목이 복사되고 원본과 다른 배열이며, 완료 기록은 복사하지 않는다', function () {
+        var m = mut(function (d) { return O.cloneFolder(d, 'fa1'); });
+        var fs = m.d.games[0].folders; var orig = fs[0];
+        return [fs[1].off, fs[1].off !== orig.off, m.d.records.length, m.d.groupRecords.length];
+      }, [['tk4'], true, 1, 1]);
+      eq('복제(캐릭터): 같은 상위 폴더 안, 원본 바로 뒤', function () {
+        var m = mut(function (d) { return O.cloneFolder(d, 'fc1'); });
+        var fs = m.d.games[0].folders;
+        return [fs[2].name, fs[2].parentId, fs[2].level, fs[1].id, fs.length];
+      }, ['캐릭터1 복사', 'fa1', 2, 'fc1', 4]);
+      eq('복제: 복사본을 고쳐도 원본의 끈 항목은 안 바뀐다', function () { var m = mut(function (d) { return O.cloneFolder(d, 'fa1'); }); m.d.games[0].folders[1].off.push('zzz'); return m.d.games[0].folders[0].off; }, ['tk4']);
+      eq('복제: 이름이 100자면 잘라서 "복사"를 붙여도 100자 이하', function () { var m = mut(function (d) { d.games[0].folders[1].name = new Array(101).join('가'); return O.cloneFolder(d, 'fc1'); }); return [m.d.games[0].folders[2].name.length <= 100, m.valid.ok]; }, [true, true]);
+      eq('복제: 없는 폴더는 거부', function () { return same2(sample(), function (d) { return O.cloneFolder(d, 'nope'); }); }, [false, true]);
+
+      eq('옮길 수 있는 상위 폴더: 바로 위 단계 폴더만 (맨 위 단계는 없음)', function () { var d = tri(); return [ids(O.eligibleParents(d, 'b1')), O.eligibleParents(d, 'a1').length, ids(O.eligibleParents(d, 'c1'))]; }, [['a1', 'a2'].slice(0, 2), 0, ['b1']]);
+      eq('옮기기: 새 상위 폴더 아래로 가고, 아래 폴더는 따라가며, 완료 기록은 그대로다', function () {
+        var m = mut(function (d) { return O.moveFolderTo(d, 'b1', 'a2'); }, tri());
+        var g = m.d.games[0]; var b1 = g.folders.filter(function (f) { return f.id === 'b1'; })[0]; var c1 = g.folders.filter(function (f) { return f.id === 'c1'; })[0];
+        return [m.r.ok, b1.parentId, c1.parentId, m.d.records.length, g.folders[g.folders.length - 1].id, m.valid.ok];
+      }, [true, 'a2', 'b1', 1, 'b1', true]);
+      eq('옮기기: 새 상위 폴더가 끈 항목이 아래 폴더로 이어지고 이전 상위가 끈 것은 빠진다', function () {
+        var base = tri(); base.games[0].folders[0].off = [];
+        var before = R.isOff(base.games[0].folders, 'c1', 't1');
+        var m = mut(function (d) { return O.moveFolderTo(d, 'b1', 'a2'); }, base);
+        return [before, R.isOff(m.d.games[0].folders, 'c1', 't1')];
+      }, [false, true]);
+      eq('옮기기 거부: 맨 위 단계 폴더', function () { var d = tri(); var r = O.moveFolderTo(d, 'a1', 'a2'); return [r.ok, r.error.indexOf('맨 위 단계') >= 0]; }, [false, true]);
+      eq('옮기기 거부: 바로 위 단계가 아닌 폴더(같은 단계, 한 단계 건너뜀, 자기 하위)', function () {
+        var d = tri(); d.games[0].folders.push({ id: 'b2', parentId: 'a1', level: 2, name: 'b2', off: [] });
+        return [same2(d, function (x) { return O.moveFolderTo(x, 'b1', 'b2'); }), same2(d, function (x) { return O.moveFolderTo(x, 'c1', 'a1'); }), same2(d, function (x) { return O.moveFolderTo(x, 'b1', 'c1'); }), same2(d, function (x) { return O.moveFolderTo(x, 'b1', 'nope'); })];
+      }, [[false, true], [false, true], [false, true], [false, true]]);
+      eq('옮기기: 지금 상위 폴더로는 noop', function () { return O.moveFolderTo(tri(), 'b1', 'a1').noop; }, true);
+
+      eq('영향 조회와 삭제: 계정을 지우면 아래 폴더와 그 기록·묶음 기록이 함께 사라진다', function () {
+        var base = sample(); base.records.push({ taskId: 'tk5', folderId: null, doneAt: '2026-10-14T10:00:00' });
+        var imp = O.impactFolder(base, 'fa1');
+        var m = mut(function (d) { return O.deleteFolder(d, 'fa1'); }, base);
+        return [imp, m.d.games[0].folders.length, m.d.records.map(function (r) { return r.taskId; }), m.d.groupRecords.length, m.valid.ok];
+      }, [{ folders: 3, records: 1, groupRecords: 1 }, 0, ['tk5'], 0, true]);
+      eq('삭제: 캐릭터 하나만 지우면 그 폴더의 기록만 사라진다', function () {
+        var m = mut(function (d) { return O.deleteFolder(d, 'fc2'); });
+        return [ids(m.d.games[0].folders), m.d.records.length, m.d.groupRecords.length];
+      }, [['fa1', 'fc1'], 1, 0]);
+      eq('삭제: 없는 폴더는 거부', function () { return same2(sample(), function (d) { return O.deleteFolder(d, 'nope'); }); }, [false, true]);
+
+      eq('순서: 같은 상위 폴더의 형제끼리만 바뀐다', function () {
+        var base = sample(); base.games[0].folders.push({ id: 'fa2', parentId: null, level: 1, name: '부계정', off: [] }, { id: 'fc3', parentId: 'fa2', level: 2, name: '캐릭터3', off: [] });
+        var m = mut(function (d) { return O.moveFolder(d, 'fc2', -1); }, base);
+        var edge = mut(function (d) { return O.moveFolder(d, 'fc1', -1); }, base);
+        var cross = mut(function (d) { return O.moveFolder(d, 'fc2', 1); }, base);
+        return [O.folderList(m.d, 'gm1').map(function (x) { return x.folder.id; }), edge.r.noop, cross.r.noop];
+      }, [['fa1', 'fc2', 'fc1', 'fa2', 'fc3'], true, true]);
+      eq('트리 순서: 위 단계 먼저, 형제는 배열 순서, 깊이가 붙는다', function () {
+        var m = mut(function (d) { return O.moveFolderTo(d, 'b1', 'a2'); }, tri());
+        return O.folderList(m.d, 'g').map(function (x) { return x.folder.id + ':' + x.depth; });
+      }, ['a1:0', 'a2:0', 'b1:1', 'c1:2']);
+
+      eq('끄기 목록: 이 폴더 단계 이상 범위의 묶음과 숙제만 (게임 공통은 제외), 위 폴더가 끈 것은 출처가 보인다', function () {
+        return O.offList(sample(), 'fc1').map(function (r) { return r.kind + ':' + r.id + ':' + r.own + ':' + r.inheritedFrom; });
+      }, ['group:gr1:false:null', 'task:tk1:false:null', 'task:tk2:false:null', 'group:gr2:false:null', 'task:tk3:false:null', 'task:tk4:false:본계정']);
+      eq('끄기 목록: 계정 폴더는 자기가 끈 항목을 own으로 보여준다 (출처 없음)', function () { return O.offList(sample(), 'fa1').filter(function (r) { return r.id === 'tk4'; }).map(function (r) { return [r.own, r.inheritedFrom]; })[0]; }, [true, null]);
+      eq('끄기 목록: 범위가 더 위 단계(계정)인 묶음은 캐릭터 폴더 목록에 없고 계정 폴더 목록에는 있다', function () {
+        var base = sample(); base.groups.push({ id: 'gA', gameId: 'gm1', name: '계정 묶음', cycleId: 'cd', scope: 1, required: null, low: false });
+        return [O.offList(base, 'fc1').some(function (r) { return r.id === 'gA'; }), O.offList(base, 'fa1').some(function (r) { return r.id === 'gA'; })];
+      }, [false, true]);
+      eq('끄기: 한 번에 여러 개를 켜고 끄고, 중복으로 쌓이지 않으며 Reset.isOff에 반영된다', function () {
+        var m = mut(function (d) { O.setOff(d, 'fc1', { gr1: true, tk3: true }); return O.setOff(d, 'fc1', { gr1: true, tk3: false }); });
+        var f = m.d.games[0].folders[1];
+        return [f.off, R.isOff(m.d.games[0].folders, 'fc1', 'gr1'), R.isOff(m.d.games[0].folders, 'fc1', 'tk3'), R.isOff(m.d.games[0].folders, 'fc2', 'gr1'), m.valid.ok];
+      }, [['gr1'], true, false, false, true]);
+      eq('끄기: 끌 수 없는 항목이 하나라도 있으면 전부 적용하지 않는다 (게임 공통 묶음, 없는 id)', function () {
+        var d = sample(); return [same2(d, function (x) { return O.setOff(x, 'fc1', { gr1: true, gr3: true }); }), same2(d, function (x) { return O.setOff(x, 'fc1', { nope: true }); }), same2(d, function (x) { return O.setOff(x, 'nope', { gr1: true }); })];
+      }, [[false, true], [false, true], [false, true]]);
+    });
+
+    suite('ops: 묶음', function () {
+      var GF = { name: '이벤트', cycleId: 'cd', scope: 2, required: null, low: false };
+      function gf(over) { return Object.assign({}, GF, over); }
+      eq('추가: 묶음 목록 맨 뒤에 생기고 low는 false로 정리된다', function () {
+        var m = mut(function (d) { return O.addGroup(d, 'gm1', { name: ' 이벤트 ', cycleId: 'cd', scope: 'game', required: 3 }); });
+        var g = m.d.groups[3];
+        return [m.r.ok, g.id.indexOf('gr_') === 0, g.name, g.scope, g.required, g.low, g.gameId, m.valid.ok];
+      }, [true, true, '이벤트', 'game', 3, false, 'gm1', true]);
+      eq('추가: 필요 개수 null(전부)과 1은 통과', function () { return [null, undefined, 1].map(function (v) { return mut(function (d) { return O.addGroup(d, 'gm1', gf({ required: v })); }).r.ok; }); }, [true, true, true]);
+      eq('추가 거부: 필요 개수 0, -1, 1.5, "2", NaN', function () {
+        return [0, -1, 1.5, '2', NaN].map(function (v) { var r = O.addGroup(clone(sample()), 'gm1', gf({ required: v })); return !r.ok && r.error.indexOf('필요 개수') >= 0; });
+      }, [true, true, true, true, true]);
+      eq('추가 거부: 주기를 안 골랐거나 없는 주기', function () { var d = sample(); return [O.addGroup(clone(d), 'gm1', gf({ cycleId: '' })).error, O.addGroup(clone(d), 'gm1', gf({ cycleId: 'nope' })).error]; }, ['리셋 주기를 골라 주세요.', '리셋 주기를 골라 주세요.']);
+      eq('추가 거부: 주기가 하나도 없는 게임은 "먼저 리셋 주기를 추가"', function () { var d = sample(); d.games.push({ id: 'gm2', name: '작혼', cycles: [], levels: [], folders: [] }); return O.addGroup(d, 'gm2', gf({ scope: 'game' })).error; }, '먼저 리셋 주기를 추가해 주세요.');
+      eq('추가 거부: 범위가 단계 수를 넘거나 0이거나 이상한 값', function () { return [3, 0, 'x', 1.5].map(function (v) { var r = O.addGroup(clone(sample()), 'gm1', gf({ scope: v })); return !r.ok && r.error.indexOf('범위') >= 0; }); }, [true, true, true, true]);
+      eq('추가 거부: 이름이 없거나 게임이 없으면 draft가 그대로', function () { var d = sample(); return [same2(d, function (x) { return O.addGroup(x, 'gm1', gf({ name: '' })); }), same2(d, function (x) { return O.addGroup(x, 'nope', gf()); })]; }, [[false, true], [false, true]]);
+
+      eq('기록이 있는지: 숙제 기록만 있는 묶음 / 묶음 기록만 있는 묶음 / 기록이 없는 묶음', function () { var d = sample(); return [O.groupHasRecords(d, 'gr1'), O.groupHasRecords(d, 'gr2'), O.groupHasRecords(d, 'gr3')]; }, [true, true, false]);
+      eq('수정: 이름·필요 개수·중요도는 기록이 있어도 바꿀 수 있다', function () {
+        var m = mut(function (d) { return O.updateGroup(d, 'gr1', gf({ name: '새 이름', required: 1, low: true })); });
+        var g = m.d.groups[0];
+        return [m.r.ok, g.name, g.required, g.low, m.valid.ok];
+      }, [true, '새 이름', 1, true, true]);
+      eq('수정 거부: 숙제 기록이 있는 묶음의 주기 변경 (안내 문구)', function () {
+        var d = sample(); var before = JSON.stringify(d); var r = O.updateGroup(d, 'gr1', gf({ cycleId: 'cw' }));
+        return [r.ok, r.error, JSON.stringify(d) === before];
+      }, [false, '이미 체크한 기록이 있어서 주기를 바꿀 수 없어요. 주기 자체를 고치거나 새 묶음을 만드세요.', true]);
+      eq('수정 거부: 묶음 기록만 있는 묶음의 주기 변경도 막는다', function () { var r = O.updateGroup(sample(), 'gr2', { name: '주간 보스', cycleId: 'cd', scope: 2, required: 2, low: false }); return [r.ok, r.error.indexOf('주기를 바꿀 수 없어요') >= 0]; }, [false, true]);
+      eq('수정 거부: 기록이 있는 묶음의 범위 변경 (안내 문구)', function () { var d = sample(); var r = O.updateGroup(d, 'gr1', gf({ scope: 1 })); return [r.ok, r.error]; }, [false, '이미 체크한 기록이 있어서 범위를 바꿀 수 없어요. 새 묶음을 만드세요.']);
+      eq('수정: 기록이 없는 묶음은 주기와 범위를 바꿀 수 있다', function () {
+        var m = mut(function (d) { return O.updateGroup(d, 'gr3', { name: '계정 주간', cycleId: 'cd', scope: 1, required: null, low: true }); });
+        var g = m.d.groups[2]; return [m.r.ok, g.cycleId, g.scope, m.valid.ok];
+      }, [true, 'cd', 1, true]);
+      eq('수정: 지운 뒤 기록이 없어지면 바꿀 수 있다 (기록 삭제 후)', function () { var d = sample(); d.records = []; d.groupRecords = []; return O.updateGroup(d, 'gr1', gf({ cycleId: 'cw' })).ok; }, true);
+      eq('수정: 잘못된 필요 개수는 거부하고 draft가 그대로', function () { return same2(sample(), function (d) { return O.updateGroup(d, 'gr3', { name: 'x', cycleId: 'cw', scope: 'game', required: 0, low: false }); }); }, [false, true]);
+      eq('수정: 없는 묶음은 거부', function () { return same2(sample(), function (d) { return O.updateGroup(d, 'nope', gf()); }); }, [false, true]);
+
+      eq('영향 조회: 숙제 2개, 숙제 기록 1개, 묶음 기록 0개 (gr1)', function () { return O.impactGroup(sample(), 'gr1'); }, { tasks: 2, records: 1, groupRecords: 0 });
+      eq('삭제: 그 묶음의 숙제·기록·묶음 기록과 폴더의 끈 항목(묶음과 숙제 id)이 정리되고 다른 묶음은 그대로', function () {
+        var base = sample(); base.games[0].folders[1].off = ['gr2', 'tk3', 'tk1'];
+        var m = mut(function (d) { return O.deleteGroup(d, 'gr2'); }, base);
+        return [ids(m.d.groups), ids(m.d.tasks), m.d.groupRecords.length, m.d.games[0].folders.map(function (f) { return f.off.join(','); }), m.d.records.length, m.valid.ok];
+      }, [['gr1', 'gr3'], ['tk1', 'tk2', 'tk5'], 0, ['', 'tk1', ''], 1, true]);
+      eq('삭제: 없는 묶음은 거부', function () { return same2(sample(), function (d) { return O.deleteGroup(d, 'nope'); }); }, [false, true]);
+      eq('순서: 같은 게임의 묶음끼리만 바뀐다', function () {
+        var base = sample(); base.games.push({ id: 'gm2', name: '작혼', cycles: [{ id: 'c2', name: '일일', type: 'daily', time: '06:00' }], levels: [], folders: [] });
+        base.groups.push({ id: 'gq', gameId: 'gm2', name: '일일', cycleId: 'c2', scope: 'game', required: null, low: false });
+        var up = mut(function (d) { return O.moveGroup(d, 'gr2', -1); }, base);
+        var edge = mut(function (d) { return O.moveGroup(d, 'gr3', 1); }, base);
+        return [ids(up.d.groups), edge.r.noop];
+      }, [['gr2', 'gr1', 'gr3', 'gq'], true]);
+    });
+
+    suite('ops: 숙제', function () {
+      eq('여러 개 추가: 빈 줄은 무시, 공백은 떼고, 묶음 안 맨 뒤에 만든 시각과 함께 생긴다', function () {
+        var m = mut(function (d) { return O.addTasks(d, 'gr1', '  하나 \n\n둘\r\n 셋', AT); });
+        var added = m.d.tasks.slice(5);
+        return [m.r.added, added.map(function (t) { return t.name; }), added.every(function (t) { return t.createdAt === '2026-10-15T05:30:00' && t.low === false && t.groupId === 'gr1'; }), m.valid.ok];
+      }, [3, ['하나', '둘', '셋'], true, true]);
+      eq('여러 개 추가 거부: 비었음, 101자 줄(줄 번호), 201줄, 없는 묶음 — draft는 그대로', function () {
+        var d = sample(); var many = []; for (var i = 0; i < 201; i++) many.push('t' + i);
+        var longRes = O.addTasks(clone(d), 'gr1', 'a\n' + new Array(102).join('가'), AT);
+        return [same2(d, function (x) { return O.addTasks(x, 'gr1', ' \n ', AT); }), longRes.error.indexOf('2번째 줄') === 0, same2(d, function (x) { return O.addTasks(x, 'gr1', many.join('\n'), AT); }), same2(d, function (x) { return O.addTasks(x, 'nope', 'a', AT); })];
+      }, [[false, true], true, [false, true], [false, true]]);
+      eq('200줄까지는 통과', function () { var many = []; for (var i = 0; i < 200; i++) many.push('t' + i); return O.addTasks(clone(sample()), 'gr1', many.join('\n'), AT).added; }, 200);
+      eq('이름 바꾸기와 중요도 낮음', function () { var m = mut(function (d) { O.renameTask(d, 'tk1', ' 새 '); return O.setTaskLow(d, 'tk1', true); }); return [m.d.tasks[0].name, m.d.tasks[0].low, m.valid.ok]; }, ['새', true, true]);
+      eq('이름 바꾸기·낮음: 없는 숙제와 빈 이름은 거부', function () { var d = sample(); return [same2(d, function (x) { return O.renameTask(x, 'nope', 'a'); }), same2(d, function (x) { return O.renameTask(x, 'tk1', ''); }), same2(d, function (x) { return O.setTaskLow(x, 'nope', true); })]; }, [[false, true], [false, true], [false, true]]);
+      eq('영향 조회: 기록이 있는 숙제 / 없는 숙제', function () { var d = sample(); return [O.impactTask(d, 'tk1'), O.impactTask(d, 'tk2')]; }, [{ records: 1 }, { records: 0 }]);
+      eq('삭제: 그 숙제의 기록과 폴더의 끈 항목에서 id가 사라지고 다른 숙제는 그대로', function () {
+        var m = mut(function (d) { return O.deleteTask(d, 'tk4'); });
+        return [ids(m.d.tasks), m.d.games[0].folders[0].off, m.d.records.length, m.valid.ok];
+      }, [['tk1', 'tk2', 'tk3', 'tk5'], [], 1, true]);
+      eq('삭제: 기록이 있는 숙제를 지우면 그 기록도 지워진다', function () { var m = mut(function (d) { return O.deleteTask(d, 'tk1'); }); return [m.d.records.length, m.valid.ok]; }, [0, true]);
+      eq('삭제: 없는 숙제는 거부', function () { return same2(sample(), function (d) { return O.deleteTask(d, 'nope'); }); }, [false, true]);
+      eq('순서: 같은 묶음의 숙제끼리만 바뀐다 (tk3을 위로 올려도 다른 묶음의 숙제와 섞이지 않는다)', function () {
+        var down = mut(function (d) { return O.moveTask(d, 'tk3', 1); });
+        var up = mut(function (d) { return O.moveTask(d, 'tk3', -1); });
+        return [ids(down.d.tasks), up.r.noop, ids(up.d.tasks)];
+      }, [['tk1', 'tk2', 'tk4', 'tk3', 'tk5'], true, ['tk1', 'tk2', 'tk3', 'tk4', 'tk5']]);
+    });
   }
 
   /* ---------- 실행과 화면 ---------- */

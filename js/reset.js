@@ -501,6 +501,11 @@
     return Math.min(ms % unit + 1, ms);
   }
 
+  // 초까지 보여 주는 시계(테스트 시각 표시 등)의 글자가 다음에 바뀌기까지 걸리는 시간(ms). 초가 바뀐 직후(+1ms)다.
+  function msUntilNextSecond(at) {
+    return 1000 - at.getMilliseconds() + 1;
+  }
+
   // 화면에 보이는 남은 시간 목록(ms, 1회는 null)에서, 다음에 다시 그릴 때까지 기다릴 시간(ms).
   // 가장 빨리 바뀌는 글자에 맞추되, 길어도 60초다 (3장 "화면 갱신").
   function redrawDelay(list) {
@@ -539,6 +544,7 @@
     bucketOf: bucketOf,
     describeRemaining: describeRemaining,
     msUntilTextChange: msUntilTextChange,
+    msUntilNextSecond: msUntilNextSecond,
     redrawDelay: redrawDelay
   };
 })(typeof window !== 'undefined' ? window : this);
