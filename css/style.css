@@ -81,9 +81,232 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 100vh;
+  min-height: 60vh;
   padding: var(--page-padding);
   text-align: center;
+}
+
+/* ---------- 공통 컴포넌트 (docs/ui-reference의 모양을 일반 HTML·CSS로 따라 만든다) ---------- */
+
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+/* 맨 위: 테스트 시각, 안내 배너, 메뉴 */
+.test-banner {
+  padding: 6px var(--page-padding);
+  background: var(--secondary);
+  border-bottom: 1px solid var(--border);
+  color: var(--destructive);
+  font-size: var(--font-size-small);
+  text-align: center;
+}
+
+.app-header { background: var(--card); border-bottom: 1px solid var(--border); }
+.app-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 1200px;
+  min-height: var(--header-height);
+  margin: 0 auto;
+  padding: 0 var(--page-padding);
+}
+.app-title { margin-right: 12px; font-weight: 600; white-space: nowrap; }
+.nav { display: flex; gap: 4px; }
+.nav a, .nav span {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: var(--muted-foreground);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.nav a:hover { background: var(--accent); color: var(--foreground); }
+.nav a[aria-current="page"] { background: var(--sidebar-accent); color: var(--foreground); }
+.nav .disabled { opacity: 0.6; cursor: default; }
+
+.banner, .notice {
+  max-width: 1200px;
+  margin: var(--gap) auto 0;
+  padding: 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--destructive);
+  border-radius: var(--radius-card);
+}
+.banner { width: calc(100% - 2 * var(--page-padding)); }
+.notice { display: flex; align-items: flex-start; gap: 12px; width: calc(100% - 2 * var(--page-padding)); }
+.banner p, .notice p { margin: 0 0 8px; }
+.banner p:last-child { margin-bottom: 0; }
+.notice p { flex: 1; margin: 0; }
+.banner-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+/* 본문 */
+.page { max-width: 1200px; margin: 0 auto; padding: var(--page-padding); }
+.page:focus { outline: none; }
+.page-title { margin: 0 0 4px; font-size: 24px; font-weight: 600; }
+.page-desc { margin: 0 0 20px; color: var(--muted-foreground); }
+.layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.stack { display: grid; gap: var(--gap); min-width: 0; }
+.editor-head { display: flex; align-items: center; gap: 8px; }
+.editor-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+
+/* 카드 */
+.card {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  min-width: 0;
+}
+.card-head { padding: 20px var(--card-padding) 0; }
+.card-title { margin: 0; font-size: 16px; font-weight: 600; }
+.card-desc { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.card-body { padding: 12px var(--card-padding); }
+.card-foot { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 var(--card-padding) 20px; }
+.muted { color: var(--muted-foreground); }
+.empty { margin: 4px 0; color: var(--muted-foreground); }
+
+/* 목록 */
+.list { margin: 0; padding: 0; list-style: none; }
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.row:first-child { border-top: 0; }
+.row-main { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.row-name { overflow-wrap: anywhere; }
+.row-indent { flex: none; }
+.game-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.game-item:hover { background: var(--accent); }
+.game-item[aria-current="true"] { background: var(--sidebar-accent); }
+.game-item .row-name { flex: 1; min-width: 0; }
+.group-block { padding: 12px 0; border-top: 1px solid var(--border); }
+.group-block:first-child { border-top: 0; padding-top: 0; }
+.group-block .list { margin-left: 12px; }
+.group-block .row { min-height: 40px; }
+
+/* 버튼, 입력 */
+.btn {
+  height: var(--control-height);
+  padding: 0 14px;
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  cursor: pointer;
+}
+.btn:hover { background: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.btn-primary:hover { background: var(--primary); opacity: 0.9; }
+.btn-danger { background: var(--destructive); border-color: var(--destructive); color: var(--primary-foreground); }
+.btn-danger:hover { background: var(--destructive); opacity: 0.9; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--muted-foreground); }
+.btn-ghost:hover { color: var(--foreground); }
+.btn-sm { height: 30px; padding: 0 10px; font-size: 13px; }
+
+.field { display: grid; gap: 6px; margin-bottom: 14px; }
+.field:last-child { margin-bottom: 0; }
+.label { font-size: 13px; font-weight: 500; }
+.hint { margin: 0; color: var(--muted-foreground); font-size: 12px; }
+.input, .select, .textarea {
+  width: 100%;
+  height: var(--control-height);
+  padding: 0 12px;
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  background: transparent;
+}
+.select option { background: var(--card); color: var(--foreground); }
+.textarea { height: auto; min-height: 140px; padding: 8px 12px; resize: vertical; white-space: pre; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; }
+.input:disabled, .select:disabled { opacity: 0.6; cursor: not-allowed; }
+.inline-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+.inline-fields > * { flex: 1; min-width: 90px; }
+.check { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
+.check.disabled { opacity: 0.6; cursor: not-allowed; }
+.inline-fields > .nowrap { flex: none; white-space: nowrap; }
+.choice-list { display: grid; gap: 4px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  font-size: var(--font-size-small);
+  white-space: nowrap;
+}
+
+/* 대화상자 (Dialog) */
+dialog.dlg {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--card-foreground);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+dialog.dlg::backdrop { background: rgba(0, 0, 0, 0.6); }
+.dlg-form { display: flex; flex-direction: column; max-height: calc(100vh - 32px); margin: 0; }
+.dlg-head { padding: 20px var(--card-padding) 0; }
+.dlg-title { margin: 0; font-size: 18px; font-weight: 600; }
+.dlg-desc { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.dlg-body { flex: 1; padding: 16px var(--card-padding); overflow-y: auto; }
+.dlg-body p { margin: 0 0 8px; }
+.dlg-body p:last-child { margin-bottom: 0; }
+.dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 0 var(--card-padding) 20px; }
+.form-error { margin: 12px 0 0; color: var(--destructive); font-size: 13px; }
+.sheet-actions { display: grid; gap: 8px; }
+.sheet-actions .btn { width: 100%; text-align: left; }
+.fixed-line { font-weight: 600; }
+
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .page { padding: 16px; }
+  .card-head { padding: 16px 16px 0; }
+  .card-body { padding: 12px 16px; }
+  .card-foot { padding: 0 16px 16px; }
+  .app-header-inner { padding: 0 16px; }
+  .app-title { display: none; }
+  .banner, .notice { width: calc(100% - 32px); }
+  .dlg-head { padding: 16px 16px 0; }
+  .dlg-body { padding: 16px; }
+  .dlg-foot { flex-direction: column-reverse; padding: 0 16px 16px; }
+  .dlg-foot .btn { width: 100%; }
+}
+@media (pointer: coarse) {
+  .btn, .input, .select { min-height: 44px; }
+  .btn-sm { min-height: 40px; }
+  .check { min-height: 40px; }
 }
 
 .coming-soon h1 {

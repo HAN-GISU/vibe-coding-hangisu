@@ -297,6 +297,7 @@ css/style.css
 js/reset.js      리셋 주기 계산(지난·다음 리셋, 기간 나누기, 주기 변경 carry), 완료 판정, D-day, 화면 갱신 시점, now() (SoT)
 js/store.js      저장, 불러오기, 가져오기 검증
 js/main.js       메인 화면
+js/ui.js         세 화면 공통 UI (메뉴, 테스트 시각 표시, 저장소 안내 배너, 확인 창). 계산은 하지 않는다
 js/settings.js   설정 화면
 js/history.js    기록 화면
 js/presets.js    기본 프리셋 데이터 (7장 내용을 그대로 옮긴 것). 내 프리셋은 store.js가 localStorage에 저장
