@@ -106,7 +106,7 @@
 <main class="doc">
   <h1>시스템 구성도</h1>
   <p class="lead">게임 숙제 체크가 어떤 파일과 저장소로 이루어지고, 데이터가 어디로 움직이는지 보여주는 문서입니다. 앱 화면이 아니며 앱 메뉴와 연결되어 있지 않습니다.</p>
-  <p class="basis">기준: CLAUDE.md(2026-10-12)와 구현 결과(1~10단계, 숙제 메모까지). 아래 파일은 모두 실제로 있고 동작합니다. 숙제 메모(10단계)는 사용자 확인 전 기본안으로 구현했습니다.</p>
+  <p class="basis">기준: CLAUDE.md(2026-10-12)와 구현 결과(1~10단계, 숙제 메모까지). 아래 파일은 모두 실제로 있고 동작합니다.</p>
 
   <h2>데이터 흐름 재생</h2>
   <div class="controls" id="flow-buttons" role="group" aria-label="흐름 선택">
@@ -143,27 +143,26 @@
     <li><svg width="36" height="10" aria-hidden="true"><line x1="2" y1="5" x2="34" y2="5" stroke="var(--ring)" stroke-width="1.5" stroke-linecap="round"/></svg>호출·데이터가 오가는 길 (CLAUDE.md에 있음)</li>
     <li><svg width="36" height="10" aria-hidden="true"><line x1="2" y1="5" x2="34" y2="5" stroke="var(--primary)" stroke-width="3" stroke-linecap="round"/></svg>지금 재생 중인 길</li>
     <li><svg width="36" height="10" aria-hidden="true"><line x1="2" y1="5" x2="34" y2="5" stroke="var(--destructive)" stroke-width="3" stroke-linecap="round"/></svg>실패하는 경우의 길 (대안)</li>
-    <li><svg width="36" height="16" aria-hidden="true"><rect x="2" y="2" width="32" height="12" rx="6" fill="none" stroke="var(--muted-foreground)" stroke-dasharray="4 3"/></svg>미정 (CLAUDE.md에 없는 것)</li>
     <li><span class="badge">3단계</span>CLAUDE.md 5장 구현 순서의 단계</li>
   </ul>
 
   <h2>구성 요소</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>이름</th><th>하는 일</th><th>구현 단계</th><th>근거</th></tr></thead>
+      <thead><tr><th>이름</th><th>하는 일</th><th>구현 단계</th></tr></thead>
       <tbody>
-        <tr><td>index.html</td><td>메인 화면. 왼쪽(폰에서는 위)에 급한 순서 사이드바, 오른쪽에 게임 목록. 숙제 체크, 한 번에 체크, 숙제 메모(✎)</td><td>4·5·9·10단계</td><td>4장</td></tr>
-        <tr><td>settings.html</td><td>게임·리셋 주기·단계·폴더·묶음·숙제 편집, 프리셋 불러오기·내 프리셋 저장·이름 바꾸기·삭제, 데이터 백업(JSON 내보내기·가져오기)</td><td>3·7·8단계</td><td>4장</td></tr>
-        <tr><td>history.html</td><td>숙제별 지난 기간 함/안함/묶음 달성. 숙제마다 최신 10개와 [더 보기]</td><td>6단계</td><td>3·4장</td></tr>
-        <tr><td>tests.html</td><td>앱 화면이 아닌 개발용 검증 페이지(도식 아래 점선 칸). reset.js·store.js·ui.js·presets.js의 테스트와 통과·실패·건너뜀 표시. 7장 표와 presets.js 대조, ?v= 캐시 값 검사 포함. 시험 코드는 이 파일 안에 둠</td><td>1단계부터</td><td>5장</td></tr>
-        <tr><td>main.js<br>settings.js<br>history.js</td><td>각 화면의 코드. 판정은 하지 않고 reset.js·store.js를 호출만 함. main.js는 같은 요소의 글자·체크만 바꾸는 방식으로 다시 그리고(누르는 중·창이 열린 동안은 미룸), settings.js는 presets.js를 불러옴</td><td>4·5·9·10 / 3·7·8 / 6단계</td><td>2-2, 5장</td></tr>
-        <tr><td>ui.js</td><td>세 화면 공통: 메뉴, 테스트 시각 표시, 저장소 안내·손상 배너, 확인 창(Dialog), 날짜 글자, JSON 내보내기·가져오기 흐름. 계산은 하지 않음</td><td>3·7단계</td><td>5장</td></tr>
-        <tr><td>reset.js</td><td>리셋 주기 계산, 완료 판정(evaluateGroup·evaluateGame), 급한 순서(buildUrgent), 기록(buildHistory·listHistoryPeriods), 남은 기간, <code>changeCycle</code>·<code>carry</code>, <code>now()</code>. 계산의 단일 기준(SoT)</td><td>1·4·5·6단계</td><td>2-2, 3장</td></tr>
-        <tr><td>store.js</td><td>저장·불러오기·검증, 쓰기 규칙(다시 읽기 → 변경 → 검증 → 저장), 체크·해제·한 번에 체크, 숙제 메모(<code>setMemo</code>), 가져오기·내보내기, 손상 보관(<code>:broken</code>), 프리셋 불러오기·저장·이름 바꾸기·삭제</td><td>2·4·7·8·10단계</td><td>3장</td></tr>
-        <tr><td>presets.js</td><td>기본 프리셋 3개(메이플스토리·로스트아크·작혼) 데이터. 7장 표 그대로이고 tests.html이 7장과 하나하나 대조</td><td>8단계</td><td>5장, 7장</td></tr>
-        <tr><td>localStorage</td><td>브라우저 안의 유일한 저장소. 키 <code>vibe-coding-hangisu:data:v1</code> 하나에 전체를 JSON 한 덩어리로(깨진 원문은 <code>:broken</code>). 서버는 없음</td><td>2단계부터</td><td>2-1, 3장</td></tr>
-        <tr><td>JSON 파일</td><td>내보내기·가져오기용 파일(<code>game-homework-YYYYMMDD-HHMM.json</code>). 완료 기록·묶음 완료 기록·내 프리셋·숙제 메모 포함</td><td>7단계</td><td>3장, 4장</td></tr>
-        <tr><td>주소의 ?now=</td><td>테스트 시각. reset.js의 <code>now()</code>만 읽고, 세 화면 맨 위에 "테스트 시각" 표시를 띄움. 메뉴·링크가 화면을 옮겨도 이어짐</td><td>1단계</td><td>3·4장</td></tr>
+        <tr><td>index.html</td><td>메인 화면. 왼쪽(폰에서는 위)에 급한 순서 사이드바, 오른쪽에 게임 목록. 숙제 체크, 한 번에 체크, 숙제 메모(✎)</td><td>4·5·9·10단계</td></tr>
+        <tr><td>settings.html</td><td>게임·리셋 주기·단계·폴더·묶음·숙제 편집, 프리셋 불러오기·내 프리셋 저장·이름 바꾸기·삭제, 데이터 백업(JSON 내보내기·가져오기)</td><td>3·7·8단계</td></tr>
+        <tr><td>history.html</td><td>숙제별 지난 기간 함/안함/묶음 달성. 숙제마다 최신 10개와 [더 보기]</td><td>6단계</td></tr>
+        <tr><td>tests.html</td><td>앱 화면이 아닌 개발용 검증 페이지(도식 아래 점선 칸). reset.js·store.js·ui.js·presets.js의 테스트와 통과·실패·건너뜀 표시. 7장 표와 presets.js 대조, ?v= 캐시 값 검사 포함. 시험 코드는 이 파일 안에 둠</td><td>1단계부터</td></tr>
+        <tr><td>main.js<br>settings.js<br>history.js</td><td>각 화면의 코드. 판정은 하지 않고 reset.js·store.js를 호출만 함. main.js는 같은 요소의 글자·체크만 바꾸는 방식으로 다시 그리고(누르는 중·창이 열린 동안은 미룸), settings.js는 presets.js를 불러옴</td><td>4·5·9·10 / 3·7·8 / 6단계</td></tr>
+        <tr><td>ui.js</td><td>세 화면 공통: 메뉴, 테스트 시각 표시, 저장소 안내·손상 배너, 확인 창(Dialog), 날짜 글자, JSON 내보내기·가져오기 흐름. 계산은 하지 않음</td><td>3·7단계</td></tr>
+        <tr><td>reset.js</td><td>리셋 주기 계산, 완료 판정(evaluateGroup·evaluateGame), 급한 순서(buildUrgent), 기록(buildHistory·listHistoryPeriods), 남은 기간, <code>changeCycle</code>·<code>carry</code>, <code>now()</code>. 계산의 단일 기준(SoT)</td><td>1·4·5·6단계</td></tr>
+        <tr><td>store.js</td><td>저장·불러오기·검증, 쓰기 규칙(다시 읽기 → 변경 → 검증 → 저장), 체크·해제·한 번에 체크, 숙제 메모(<code>setMemo</code>), 가져오기·내보내기, 손상 보관(<code>:broken</code>), 프리셋 불러오기·저장·이름 바꾸기·삭제</td><td>2·4·7·8·10단계</td></tr>
+        <tr><td>presets.js</td><td>기본 프리셋 3개(메이플스토리·로스트아크·작혼) 데이터. 7장 표 그대로이고 tests.html이 7장과 하나하나 대조</td><td>8단계</td></tr>
+        <tr><td>localStorage</td><td>브라우저 안의 유일한 저장소. 키 <code>vibe-coding-hangisu:data:v1</code> 하나에 전체를 JSON 한 덩어리로(깨진 원문은 <code>:broken</code>). 서버는 없음</td><td>2단계부터</td></tr>
+        <tr><td>JSON 파일</td><td>내보내기·가져오기용 파일(<code>game-homework-YYYYMMDD-HHMM.json</code>). 완료 기록·묶음 완료 기록·내 프리셋·숙제 메모 포함</td><td>7단계</td></tr>
+        <tr><td>주소의 ?now=</td><td>테스트 시각. reset.js의 <code>now()</code>만 읽고, 세 화면 맨 위에 "테스트 시각" 표시를 띄움. 메뉴·링크가 화면을 옮겨도 이어짐</td><td>1단계</td></tr>
       </tbody>
     </table>
   </div>
@@ -180,16 +179,6 @@
       <li>기록 화면 열기: history.js → store.js로 읽기, reset.js의 기간 나누기·함/안함 계산(<code>buildHistory</code>). 리셋 순간에 새 기간 줄이 생김 <span class="tag">6단계</span></li>
       <li>급한 순서 사이드바: main.js → reset.js <code>buildUrgent</code>(<code>evaluateGame</code> 결과 재사용). 폰 폭에서는 접힌 채 앞 3줄과 "외 N줄" <span class="tag">5·9단계</span></li>
       <li>테스트 실행: tests.html(앱 화면이 아닌 개발용 검증 페이지라 도식 아래 점선 칸에 따로 둠) → reset.js·store.js·ui.js·presets.js. HTTP로 열면 ../CLAUDE.md의 7장과 HTML의 ?v= 값도 읽어 대조 <span class="tag">5장</span></li>
-    </ul>
-  </div>
-
-  <h2>남은 미정 · 범위 밖</h2>
-  <div class="box tbd">
-    <ul>
-      <li>숙제 메모의 설계(숙제마다 하나, 메인에서만 쓰고 보기, 300자, 내 프리셋에 복사)는 사용자 확인 전 기본안이다. 바꾸라고 하면 그때 고친다.</li>
-      <li>여러 탭에서 같은 데이터를 동시에 편집하는 경우는 범위 밖이다(마지막 저장이 이김). 저장소가 바뀌면 다른 탭은 60초 안 또는 탭이 다시 보일 때 따라간다.</li>
-      <li>기본 프리셋은 2026-10-12 기준이다. 게임 업데이트로 달라지면 불러온 뒤 사용자가 고친다.</li>
-      <li>저장소를 쓸 수 없는 브라우저(시크릿 모드 등)에서는 메모리에서만 동작한다. 닫으면 사라지므로 JSON으로 내보내라고 안내한다.</li>
     </ul>
   </div>
 
