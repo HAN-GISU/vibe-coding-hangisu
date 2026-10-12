@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>시스템 구성도 · 게임 숙제 체크</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    /* 이 문서 전용 스타일. 색은 css/style.css의 변수만 쓴다. */
+    .doc { max-width: 1240px; margin: 0 auto; padding: var(--page-padding); }
+    .doc h1 { margin: 0 0 4px; font-size: 24px; font-weight: 600; }
+    .doc h2 { margin: 36px 0 12px; font-size: 16px; font-weight: 600; }
+    .lead { margin: 0 0 8px; color: var(--muted-foreground); }
+    .basis { margin: 0; color: var(--muted-foreground); font-size: var(--font-size-small); }
+
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .btn {
+      height: var(--control-height); padding: 0 14px;
+      border: 1px solid var(--input); border-radius: calc(var(--radius) - 2px);
+      background: var(--secondary); color: var(--secondary-foreground);
+      font: inherit; cursor: pointer;
+    }
+    .btn:hover { background: var(--accent); }
+    .btn:focus-visible, .step-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+    .btn[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+    .btn.ctl { background: transparent; }
+
+    .caption {
+      min-height: 76px; margin: 0 0 12px; padding: 12px 16px;
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card);
+    }
+    .caption .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; color: var(--muted-foreground); font-size: var(--font-size-small); }
+    .caption .text { margin: 0; }
+    .badge {
+      display: inline-flex; align-items: center; height: 22px; padding: 0 10px;
+      border: 1px solid var(--border); border-radius: 999px;
+      font-size: var(--font-size-small); color: var(--muted-foreground); white-space: nowrap;
+    }
+    .badge[hidden] { display: none; }
+    .badge.alt { color: var(--destructive); border-color: var(--destructive); }
+    .badge.tbd { border-style: dashed; }
+
+    .scroller { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); -webkit-overflow-scrolling: touch; }
+    .hint { margin: 6px 0 0; color: var(--muted-foreground); font-size: var(--font-size-small); }
+    @media (min-width: 1100px) { .hint { display: none; } }
+    svg.diagram { display: block; width: 100%; min-width: 1000px; height: auto; font-family: var(--font-sans); }
+
+    /* 도식 안 요소 */
+    .col-head { fill: var(--muted-foreground); font-size: 12px; letter-spacing: .02em; }
+    .edge { fill: none; stroke: var(--ring); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; transition: stroke .2s, stroke-width .2s; }
+    .edge.on { stroke: var(--primary); stroke-width: 3; }
+    .edge.on.alt { stroke: var(--destructive); }
+    .node rect { fill: var(--background); stroke: var(--ring); stroke-width: 1; transition: fill .2s, stroke .2s; }
+    .node.data rect { fill: var(--secondary); }
+    .node.on rect { fill: var(--accent); stroke: var(--primary); stroke-width: 2; }
+    .node.on.alt rect { stroke: var(--destructive); }
+    .n-title { fill: var(--foreground); font-size: 14px; font-weight: 600; }
+    .n-sub { fill: var(--muted-foreground); font-size: 11.5px; }
+    .n-step { fill: var(--muted-foreground); font-size: 11px; }
+    .n-item { fill: var(--foreground); font-size: 11.5px; }
+    .tbd-box { fill: none; stroke: var(--muted-foreground); stroke-width: 1; stroke-dasharray: 4 3; }
+    .tbd-text { fill: var(--muted-foreground); font-size: 11px; font-style: italic; }
+    .bus-label { fill: var(--muted-foreground); font-size: 11px; }
+    .packet circle { fill: var(--primary); stroke: var(--sidebar-primary); stroke-width: 4; }
+    .packet.alt circle { fill: var(--destructive); }
+    .packet text { fill: var(--foreground); font-size: 12px; font-weight: 600; text-anchor: middle; paint-order: stroke; stroke: var(--card); stroke-width: 4px; stroke-linejoin: round; }
+
+    .steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 4px; }
+    .step-btn {
+      display: flex; gap: 10px; width: 100%; padding: 8px 12px; text-align: left;
+      background: transparent; color: var(--muted-foreground); font: inherit;
+      border: 1px solid transparent; border-radius: var(--radius); cursor: pointer;
+    }
+    .step-btn:hover { background: var(--secondary); }
+    .step-btn .no { flex: none; width: 1.5em; color: var(--muted-foreground); }
+    .step-btn.active { background: var(--accent); color: var(--foreground); border-color: var(--border); }
+    .step-btn.alt .no { color: var(--destructive); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 16px 24px; margin: 0; padding: 0; list-style: none; color: var(--muted-foreground); font-size: var(--font-size-small); }
+    .legend li { display: flex; align-items: center; gap: 8px; }
+    .legend svg { flex: none; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-card); }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+    th { height: var(--table-head-height); color: var(--muted-foreground); font-weight: 500; font-size: var(--font-size-small); white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { white-space: nowrap; font-weight: 600; }
+
+    .box { padding: 16px 20px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); }
+    .box.tbd { border-style: dashed; }
+    .box ul { margin: 0; padding-left: 20px; }
+    .box li { margin: 4px 0; }
+    .box li .tag { color: var(--muted-foreground); font-size: var(--font-size-small); }
+    .foot { margin-top: 36px; color: var(--muted-foreground); font-size: var(--font-size-small); }
+    code { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px; }
+
+    @media (max-width: 600px) { .doc { padding: 16px; } }
+  </style>
+</head>
+<body>
+<main class="doc">
+  <h1>시스템 구성도</h1>
+  <p class="lead">게임 숙제 체크가 어떤 파일과 저장소로 이루어지고, 데이터가 어디로 움직이는지 보여주는 문서입니다. 앱 화면이 아니며 앱 메뉴와 연결되어 있지 않습니다.</p>
+  <p class="basis">기준: CLAUDE.md(2026-10-12)와 1단계 계획(리셋 주기 <code>carry</code> 포함). 구현이 진행되면 달라질 수 있습니다. 지금 실제로 있는 앱 파일은 준비 중 페이지(<code>index.html</code>)뿐이고, 나머지는 모두 구현 전입니다.</p>
+
+  <h2>데이터 흐름 재생</h2>
+  <div class="controls" id="flow-buttons" role="group" aria-label="흐름 선택">
+    <button class="btn" data-flow="f1" aria-pressed="true">① 체크 → 기록 저장</button>
+    <button class="btn" data-flow="f2" aria-pressed="false">② 열기 → 계산 → 표시</button>
+    <button class="btn" data-flow="f3" aria-pressed="false">③ JSON 가져오기</button>
+    <button class="btn" data-flow="f4" aria-pressed="false">④ 프리셋 불러오기</button>
+  </div>
+  <div class="controls">
+    <button class="btn ctl" id="btn-play" type="button">▶ 재생</button>
+    <button class="btn ctl" id="btn-next" type="button">다음 단계 ›</button>
+  </div>
+
+  <div class="caption" id="caption" aria-live="polite">
+    <div class="meta"><strong id="cap-title"></strong><span class="badge" id="cap-count"></span><span class="badge alt" id="cap-alt" hidden>대안 흐름</span></div>
+    <p class="text" id="cap-text"></p>
+  </div>
+
+  <div class="scroller" id="scroller">
+    <noscript><p style="padding:16px">이 도식은 JavaScript가 켜져 있어야 그려집니다. 아래 표와 목록은 그대로 읽을 수 있습니다.</p></noscript>
+    <svg class="diagram" id="diagram" viewBox="0 0 1160 640" role="img" aria-labelledby="dg-title dg-desc">
+      <title id="dg-title">시스템 구성도</title>
+      <desc id="dg-desc">왼쪽의 사용자 입력, 화면 HTML, 화면 코드 JS, 공통 모듈 reset.js와 store.js와 presets.js, 오른쪽 localStorage 순으로 이어지는 구성도. 자세한 내용은 아래 표와 단계 목록에 글로 있다.</desc>
+    </svg>
+  </div>
+  <p class="hint">← 좌우로 밀어서 전체를 볼 수 있어요. 재생 중에는 지금 단계 쪽으로 자동으로 따라갑니다.</p>
+
+  <ol class="steps" id="steps" aria-label="선택한 흐름의 단계"></ol>
+
+  <h2>범례</h2>
+  <ul class="legend">
+    <li><svg width="36" height="10" aria-hidden="true"><line x1="2" y1="5" x2="34" y2="5" stroke="var(--ring)" stroke-width="1.5" stroke-linecap="round"/></svg>호출·데이터가 오가는 길 (CLAUDE.md에 있음)</li>
+    <li><svg width="36" height="10" aria-hidden="true"><line x1="2" y1="5" x2="34" y2="5" stroke="var(--primary)" stroke-width="3" stroke-linecap="round"/></svg>지금 재생 중인 길</li>
+    <li><svg width="36" height="10" aria-hidden="true"><line x1="2" y1="5" x2="34" y2="5" stroke="var(--destructive)" stroke-width="3" stroke-linecap="round"/></svg>실패하는 경우의 길 (대안)</li>
+    <li><svg width="36" height="16" aria-hidden="true"><rect x="2" y="2" width="32" height="12" rx="6" fill="none" stroke="var(--muted-foreground)" stroke-dasharray="4 3"/></svg>미정 (CLAUDE.md에 없는 것)</li>
+    <li><span class="badge">3단계</span>CLAUDE.md 5장 구현 순서의 단계</li>
+  </ul>
+
+  <h2>구성 요소</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>이름</th><th>하는 일</th><th>구현 단계</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>index.html</td><td>메인 화면. 왼쪽에 급한 순 사이드바, 오른쪽에 게임 목록</td><td>0단계 완료(준비 중 페이지) · 4·5단계</td><td>4장</td></tr>
+        <tr><td>settings.html</td><td>게임·리셋 주기·단계·폴더·묶음·숙제 편집, JSON 내보내기·가져오기, 프리셋 불러오기·저장</td><td>3·7·8단계</td><td>4장</td></tr>
+        <tr><td>history.html</td><td>숙제별 지난 기간 함/안함</td><td>6단계</td><td>4장</td></tr>
+        <tr><td>tests.html</td><td>reset.js 등의 테스트와 통과·실패 표시. 시험 코드는 이 파일 안에 둠</td><td>1단계부터</td><td>5장, 1단계 계획</td></tr>
+        <tr><td>main.js<br>settings.js<br>history.js</td><td>각 화면의 코드. 계산은 하지 않고 reset.js를 호출만 함</td><td>4·5 / 3·7·8 / 6단계</td><td>2-2, 5장 파일 구조</td></tr>
+        <tr><td>reset.js</td><td>리셋 주기 계산, 완료 판정, 묶음 완료, 남은 기간, <code>now()</code>. 계산의 단일 기준(SoT). 1단계 계획에는 주기를 바꿔도 체크가 유지되도록 <code>changeCycle</code>과 <code>carry</code>가 들어 있음(CLAUDE.md 3장에는 1단계 구현 때 반영)</td><td>1단계</td><td>2-2, 3장, 1단계 계획</td></tr>
+        <tr><td>store.js</td><td>저장, 불러오기, 가져오기 검증, 완료 기록 누적, 내 프리셋 저장</td><td>2단계 (내 프리셋은 8단계)</td><td>5장</td></tr>
+        <tr><td>presets.js</td><td>기본 프리셋 3개(메이플스토리·로스트아크·작혼) 데이터. 7장 내용 그대로</td><td>8단계</td><td>5장, 7장</td></tr>
+        <tr><td>localStorage</td><td>브라우저 안의 유일한 저장소. 서버는 없음</td><td>2단계부터</td><td>2-1</td></tr>
+        <tr><td>JSON 파일</td><td>내보내기·가져오기용 파일. 완료 기록과 내 프리셋을 전부 포함</td><td>7단계</td><td>3장, 4장</td></tr>
+        <tr><td>주소의 ?now=</td><td>테스트 시각. reset.js의 <code>now()</code>만 읽고, 화면에 "테스트 시각" 표시를 띄움</td><td>1단계</td><td>3장</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>이 도식에서 재생하지 않는 흐름 (CLAUDE.md에는 있음)</h2>
+  <div class="box">
+    <ul>
+      <li>설정 편집(게임·주기·단계·폴더·묶음·숙제 추가·수정·삭제): settings.js → store.js → localStorage <span class="tag">3단계</span></li>
+      <li>리셋 주기 바꾸기: settings.js → reset.js <code>changeCycle</code>이 <code>carry</code>를 계산 → store.js 저장. 이미 한 체크가 사라지거나 되살아나지 않게 함 <span class="tag">1단계 계획 · 3단계 화면</span></li>
+      <li>체크 해제: 이번 기간에 생긴 그 숙제의 기록만 지움. 지난 기간 기록은 건드리지 않음 <span class="tag">3장</span></li>
+      <li>열 머리·폴더 체크(한 번에 체크): 확인 창을 거쳐 기록 여러 개를 남김. 필요 개수 묶음은 묶음 완료 기록 하나만 남김 <span class="tag">3장, 4단계</span></li>
+      <li>JSON 내보내기: store.js → JSON 파일. 완료 기록과 내 프리셋 포함 <span class="tag">7단계</span></li>
+      <li>내 프리셋 저장·이름 바꾸기·삭제: settings.js → store.js → localStorage. 완료 기록은 넣지 않음 <span class="tag">4장, 8단계</span></li>
+      <li>기록 화면 열기: history.js → store.js로 읽기, reset.js의 기간 나누기·함/안함 계산 <span class="tag">6단계</span></li>
+      <li>테스트 실행: tests.html → reset.js(이후 store.js도) <span class="tag">5장</span></li>
+    </ul>
+  </div>
+
+  <h2>미정 (CLAUDE.md에 없어서 정하지 않은 것)</h2>
+  <div class="box tbd">
+    <ul>
+      <li>localStorage에 쓰는 키 이름과 저장 형식(버전 필드 등)</li>
+      <li>JSON 파일의 형식(버전 필드, 파일 이름 등)</li>
+      <li>localStorage의 데이터가 직접 깨졌을 때 앱이 어떻게 시작하는지 (가져오기 실패 때는 기존 데이터를 유지한다고만 정해져 있음)</li>
+      <li>화면 사이를 오가는 방식(메뉴·링크)</li>
+      <li>메인 화면 빈 상태의 [프리셋 불러오기] 버튼이 무엇을 여는지 (메인에서 창을 띄우는지, 설정 화면으로 가는지). 그래서 main.js와 presets.js의 연결도 미정</li>
+      <li>"테스트 시각" 표시를 어느 화면에 띄우는지</li>
+      <li>화면을 갱신하는 타이머의 주기 (타이머는 갱신용으로만 쓴다는 것만 정해져 있음)</li>
+      <li>화면별로 어떤 js 파일을 어떤 순서로 불러오는지 (5장은 파일의 역할만 정함)</li>
+      <li>남은 기간의 표시 방식(<code>D-2</code> 단독 또는 <code>D-2 · 2일 20시간</code>): 4단계 화면에서 정함</li>
+    </ul>
+  </div>
+
+  <p class="foot">이 파일은 문서 한 장입니다. 외부 라이브러리 없이 HTML·SVG·CSS와 이 페이지 안의 스크립트만 씁니다.</p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var NS = 'http://www.w3.org/2000/svg';
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- 도식 데이터 ---------- */
+  // kind: io(입력·파일) / screen(HTML) / js / data(저장소)
+  var NODES = [
+    { id: 'now',    x: 10,  y: 80,  w: 150, h: 70,  kind: 'io',     t: '주소의 ?now=',  s: '테스트 시각 (선택)', k: '1단계' },
+    { id: 'user',   x: 10,  y: 227, w: 150, h: 70,  kind: 'io',     t: '사용자',        s: '클릭 · 입력 · 파일 선택', k: '' },
+    { id: 'json',   x: 10,  y: 440, w: 150, h: 70,  kind: 'io',     t: 'JSON 파일',     s: '내보내기 · 가져오기', k: '7단계' },
+    { id: 'idx',    x: 210, y: 80,  w: 170, h: 70,  kind: 'screen', t: 'index.html',    s: '메인 화면', k: '0단계 완료 · 4·5단계' },
+    { id: 'hh',     x: 210, y: 180, w: 170, h: 70,  kind: 'screen', t: 'history.html',  s: '기록 화면', k: '6단계' },
+    { id: 'tst',    x: 210, y: 310, w: 170, h: 70,  kind: 'screen', t: 'tests.html',    s: '테스트 (코드는 이 파일 안)', k: '1단계부터' },
+    { id: 'sh',     x: 210, y: 440, w: 170, h: 70,  kind: 'screen', t: 'settings.html', s: '설정 화면', k: '3·7·8단계' },
+    { id: 'mj',     x: 430, y: 80,  w: 150, h: 70,  kind: 'js',     t: 'main.js',       s: '메인 화면 코드', k: '4·5단계' },
+    { id: 'hj',     x: 430, y: 180, w: 150, h: 70,  kind: 'js',     t: 'history.js',    s: '기록 화면 코드', k: '6단계' },
+    { id: 'sj',     x: 430, y: 440, w: 150, h: 70,  kind: 'js',     t: 'settings.js',   s: '설정 화면 코드', k: '3·7·8단계' },
+    { id: 'reset',  x: 680, y: 70,  w: 210, h: 220, kind: 'js',     t: 'reset.js',      s: '계산의 단일 기준 (SoT)', k: '1단계',
+      items: ['now()  ←  ?now=', 'lastReset · nextReset', 'evaluateGroup (완료 판정)', 'formatRemaining (남은 기간)', 'validateCycle (주기 검증)', 'changeCycle → carry (1단계 계획)'] },
+    { id: 'store',  x: 680, y: 330, w: 210, h: 180, kind: 'js',     t: 'store.js',      s: '저장 · 불러오기 · 검증', k: '2단계 (내 프리셋 8단계)',
+      items: ['완료 기록 누적', '가져오기 구조 검증', '내 프리셋 저장'] },
+    { id: 'presets',x: 680, y: 540, w: 210, h: 70,  kind: 'js',     t: 'presets.js',    s: '기본 프리셋 3개 데이터', k: '8단계' },
+    { id: 'ls',     x: 950, y: 330, w: 190, h: 180, kind: 'data',   t: 'localStorage',  s: '브라우저 안에만 저장', k: '2단계부터',
+      items: ['게임 · 묶음 · 숙제 · 폴더', '완료 기록 (계속 쌓임)', '묶음 완료 기록', '내 프리셋'], tbd: '키 이름 · 형식: 미정' }
+  ];
+
+  var COLS = [
+    { x: 10, t: '입력' }, { x: 210, t: '화면 (HTML)' }, { x: 430, t: '화면 코드 (JS)' },
+    { x: 680, t: '공통 모듈 (JS)' }, { x: 950, t: '저장' }
+  ];
+
+  // 길 하나 = path 하나. 쓰인 방향이 "앞으로"다.
+  var EDGES = {
+    u_in:  'M160,262 H185',
+    ub1:   'M185,262 V200',
+    ub2:   'M185,200 V100',
+    ub3:   'M185,262 V330',
+    ub4:   'M185,330 V460',
+    s_idx: 'M185,100 H210',
+    s_hh:  'M185,200 H210',
+    s_t:   'M185,330 H210',
+    s_sh:  'M185,460 H210',
+    j_sh:  'M160,487 H210',
+    e_im:  'M380,115 H430',
+    e_hh:  'M380,215 H430',
+    e_ss:  'M380,475 H430',
+    c_main:'M580,115 H630',
+    c_hj:  'M580,215 H630',
+    c_t:   'M380,345 H630',
+    c_sj:  'M580,475 H630',
+    bus_a: 'M630,115 V150',
+    bus_b: 'M630,150 V215',
+    bus_c: 'M630,215 V345',
+    bus_d: 'M630,345 V400',
+    bus_e: 'M630,400 V475',
+    b_reset:'M630,150 H680',
+    b_store:'M630,400 H680',
+    p:     'M580,500 H650 V575 H680',
+    v:     'M785,330 V290',
+    ls:    'M890,420 H950',
+    nw:    'M85,80 V36 H785 V70'
+  };
+
+  // 경로: 길 id의 목록. '~'가 붙으면 거꾸로 간다.
+  function rev(r) {
+    return r.slice().reverse().map(function (s) { return s.charAt(0) === '~' ? s.slice(1) : '~' + s; });
+  }
+  var R = {
+    user_index:    ['u_in', 'ub1', 'ub2', 's_idx'],
+    user_settings: ['u_in', 'ub3', 'ub4', 's_sh'],
+    index_main:    ['e_im'],
+    settings_sj:   ['e_ss'],
+    json_settings: ['j_sh'],
+    main_reset:    ['c_main', 'bus_a', 'b_reset'],
+    main_store:    ['c_main', 'bus_a', 'bus_b', 'bus_c', 'bus_d', 'b_store'],
+    sj_store:      ['c_sj', '~bus_e', 'b_store'],
+    sj_presets:    ['p'],
+    store_reset:   ['v'],
+    store_ls:      ['ls'],
+    now_reset:     ['nw']
+  };
+
+  var FLOWS = {
+    f1: { title: '① 숙제 체크 → 완료 기록 저장', steps: [
+      { n: ['user', 'idx'], text: '사용자가 index.html에서 숙제 체크박스를 누른다. 체크하면 바로 완료 처리된다.',
+        moves: [{ r: R.user_index, l: '체크' }] },
+      { n: ['idx', 'mj'], text: 'index.html의 클릭을 main.js가 받는다.',
+        moves: [{ r: R.index_main, l: '클릭' }] },
+      { n: ['mj', 'reset', 'now'], text: 'main.js가 완료 시각을 reset.js의 now()로 얻는다. 주소에 ?now=가 있으면 그 시각이고, 없으면 실제 시각이다.',
+        moves: [{ r: R.main_reset, l: 'now()?' }, { r: R.now_reset, l: '?now= (있을 때만)' }, { r: rev(R.main_reset), l: 'doneAt' }] },
+      { n: ['mj', 'store'], text: 'main.js가 완료 기록 {taskId, folderId, doneAt}을 store.js에 넘긴다. 완료 여부(true/false)는 저장하지 않고 기록만 저장한다.',
+        moves: [{ r: R.main_store, l: '{taskId, folderId, doneAt}' }] },
+      { n: ['store', 'ls'], text: 'store.js가 localStorage의 기록 뒤에 덧붙여 저장한다. 지난 기간 기록은 지우거나 덮어쓰지 않는다.',
+        moves: [{ r: R.store_ls, l: '기록 추가' }] },
+      { n: ['mj', 'idx'], text: 'main.js가 ②와 같은 방법으로 완료 여부를 다시 계산해 화면을 갱신한다. (체크를 해제하면 이번 기간에 생긴 기록만 지운다.)',
+        moves: [{ r: rev(R.index_main), l: '화면 갱신' }] }
+    ] },
+    f2: { title: '② 페이지를 열 때 계산 → 화면 표시', steps: [
+      { n: ['user', 'idx'], text: '사용자가 index.html을 연다.',
+        moves: [{ r: R.user_index, l: '열기' }] },
+      { n: ['idx', 'mj'], text: 'index.html이 main.js를 실행한다.',
+        moves: [{ r: R.index_main, l: '스크립트 실행' }] },
+      { n: ['mj', 'store', 'ls'], text: 'main.js가 store.js를 통해 localStorage에서 게임·묶음·숙제·완료 기록을 읽는다.',
+        moves: [{ r: R.main_store, l: '읽기' }, { r: rev(R.store_ls), l: '저장된 데이터' }, { r: rev(R.main_store), l: '데이터' }] },
+      { n: ['mj', 'reset', 'now'], text: '현재 시각을 얻는다. 주소에 ?now=가 있으면 reset.js의 now()가 그 시각을 쓰고, 화면에 "테스트 시각" 표시가 뜬다.',
+        moves: [{ r: R.main_reset, l: 'now()?' }, { r: R.now_reset, l: '?now= (있을 때만)' }, { r: rev(R.main_reset), l: '현재 시각' }] },
+      { n: ['mj', 'reset'], text: 'main.js가 시각과 기록을 reset.js에 넘겨 완료 여부, 묶음 진행 상황, 남은 기간, 사이드바 묶음 단위를 계산한다. 판정은 reset.js 한 곳에서만 한다.',
+        moves: [{ r: R.main_reset, l: '시각 · 기록 · 설정' }, { r: rev(R.main_reset), l: '완료 · 진행 · 남은 기간' }] },
+      { n: ['mj', 'idx'], text: 'main.js가 게임 목록과 사이드바를 그려 index.html에 표시한다. (기록 화면은 history.js가 같은 순서로 reset.js의 기간 계산을 쓴다.)',
+        moves: [{ r: rev(R.index_main), l: '화면 표시' }] }
+    ] },
+    f3: { title: '③ JSON 가져오기 → 검증 → 저장', steps: [
+      { n: ['user', 'sh', 'json'], text: '사용자가 settings.html에서 JSON 파일을 고른다.',
+        moves: [{ r: R.user_settings, l: '파일 선택' }, { r: R.json_settings, l: 'JSON 파일' }] },
+      { n: ['sh', 'sj'], text: 'settings.js가 파일 내용을 읽는다.',
+        moves: [{ r: R.settings_sj, l: 'JSON 텍스트' }] },
+      { n: ['sj', 'store'], text: 'settings.js가 내용을 store.js에 넘겨 가져오기를 요청한다.',
+        moves: [{ r: R.sj_store, l: '가져오기 요청' }] },
+      { n: ['store', 'reset'], text: 'store.js가 구조를 검증한다. 리셋 주기 값은 reset.js의 validateCycle로 확인한다. 검증이 끝나기 전에는 아무것도 저장하지 않는다.',
+        moves: [{ r: R.store_reset, l: 'validateCycle' }, { r: rev(R.store_reset), l: '결과' }] },
+      { n: ['store', 'ls'], text: '검증을 통과하면 기존 데이터를 교체해 localStorage에 저장한다.',
+        moves: [{ r: R.store_ls, l: '교체 저장' }] },
+      { alt: true, n: ['store', 'sj'], text: '검증에 실패하면(대안): localStorage는 건드리지 않고 기존 데이터를 그대로 둔다. 오류는 페이지 안 UI로 알린다.',
+        moves: [{ r: rev(R.sj_store), l: '오류 안내' }] }
+    ] },
+    f4: { title: '④ 프리셋 불러오기', steps: [
+      { n: ['user', 'sh'], text: '사용자가 settings.html에서 [프리셋 불러오기]를 누른다. (게임이 하나도 없을 때 메인 화면 빈 상태 안내에도 같은 버튼이 있는데, 그 버튼이 무엇을 여는지는 미정.)',
+        moves: [{ r: R.user_settings, l: '프리셋 불러오기' }] },
+      { n: ['sh', 'sj'], text: 'settings.js가 클릭을 받는다.',
+        moves: [{ r: R.settings_sj, l: '클릭' }] },
+      { n: ['sj', 'presets'], text: 'settings.js가 presets.js에서 기본 프리셋(메이플스토리·로스트아크·작혼)을 가져온다.',
+        moves: [{ r: R.sj_presets, l: '기본 프리셋 요청' }, { r: rev(R.sj_presets), l: '기본 프리셋 3개' }] },
+      { n: ['sj', 'store', 'ls'], text: '내 프리셋은 store.js가 localStorage에서 읽어 온다. 목록에는 기본 프리셋과 내 프리셋이 함께 나온다.',
+        moves: [{ r: R.sj_store, l: '내 프리셋 요청' }, { r: rev(R.store_ls), l: '내 프리셋' }, { r: rev(R.sj_store), l: '목록' }] },
+      { n: ['user', 'sh'], text: '사용자가 하나를 고르고, 확인 창에서 폴더 구조를 들여쓰기로 적는다. 같은 이름의 게임이 있으면 덮어쓰지 않고 "따로 하나 더 추가 / 취소"를 묻는다.',
+        moves: [{ r: R.user_settings, l: '선택 · 폴더 입력' }] },
+      { n: ['sj', 'store'], text: 'settings.js가 프리셋 내용을 복사해, 원본과 별개의 새 게임으로 store.js에 넘긴다.',
+        moves: [{ r: R.sj_store, l: '새 게임 추가' }] },
+      { n: ['store', 'ls'], text: 'store.js가 localStorage에 추가만 한다. 기존 게임과 완료 기록은 건드리지 않는다.',
+        moves: [{ r: R.store_ls, l: '추가 저장' }] }
+    ] }
+  };
+
+  /* ---------- 도식 그리기 ---------- */
+  var svg = document.getElementById('diagram');
+  var scroller = document.getElementById('scroller');
+
+  function mk(name, attrs, parent) {
+    var e = document.createElementNS(NS, name);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function text(parent, x, y, cls, str, anchor) {
+    var t = mk('text', { x: x, y: y, 'class': cls }, parent);
+    if (anchor) t.setAttribute('text-anchor', anchor);
+    t.textContent = str;
+    return t;
+  }
+  function tbdChip(parent, x, y, w, label) {
+    mk('rect', { x: x, y: y, width: w, height: 24, rx: 12, 'class': 'tbd-box' }, parent);
+    text(parent, x + w / 2, y + 16, 'tbd-text', label, 'middle');
+  }
+
+  COLS.forEach(function (c) { text(svg, c.x, 22, 'col-head', c.t); });
+
+  var edgeEls = {};
+  var gEdges = mk('g', {}, svg);
+  Object.keys(EDGES).forEach(function (id) {
+    edgeEls[id] = mk('path', { d: EDGES[id], 'class': 'edge' }, gEdges);
+  });
+
+  // 호출선 이름표
+  var bl = text(svg, 0, 0, 'bus-label', '호출선');
+  bl.setAttribute('transform', 'translate(645,300) rotate(-90)');
+  bl.setAttribute('text-anchor', 'middle');
+
+  var nodeEls = {};
+  var nodeById = {};
+  NODES.forEach(function (n) {
+    nodeById[n.id] = n;
+    var g = mk('g', { 'class': 'node ' + n.kind }, svg);
+    mk('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 8 }, g);
+    text(g, n.x + 12, n.y + 22, 'n-title', n.t);
+    text(g, n.x + 12, n.y + 40, 'n-sub', n.s);
+    if (n.k) text(g, n.x + 12, n.y + 57, 'n-step', n.k);
+    (n.items || []).forEach(function (it, i) { text(g, n.x + 12, n.y + 82 + i * 20, 'n-item', it); });
+    if (n.tbd) tbdChip(g, n.x + 12, n.y + n.h - 34, n.w - 24, n.tbd);
+    nodeEls[n.id] = g;
+  });
+
+  tbdChip(svg, 10, 518, 150, '파일 형식: 미정');
+  tbdChip(svg, 210, 526, 170, '화면 사이 이동: 미정');
+
+  var packet = mk('g', { 'class': 'packet', visibility: 'hidden' }, svg);
+  mk('circle', { r: 7 }, packet);
+  var packetLabel = text(packet, 0, -14, '', '');
+
+  /* ---------- 재생 ---------- */
+  var state = { flow: 'f1', idx: -1, token: 0, playing: false };
+  var btnPlay = document.getElementById('btn-play');
+  var btnNext = document.getElementById('btn-next');
+  var flowButtons = Array.prototype.slice.call(document.querySelectorAll('#flow-buttons .btn'));
+  var capTitle = document.getElementById('cap-title');
+  var capCount = document.getElementById('cap-count');
+  var capAlt = document.getElementById('cap-alt');
+  var capText = document.getElementById('cap-text');
+  var stepsEl = document.getElementById('steps');
+
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function steps() { return FLOWS[state.flow].steps; }
+
+  function clearMarks() {
+    Object.keys(edgeEls).forEach(function (k) { edgeEls[k].classList.remove('on', 'alt'); });
+    Object.keys(nodeEls).forEach(function (k) { nodeEls[k].classList.remove('on', 'alt'); });
+    packet.setAttribute('visibility', 'hidden');
+    packet.classList.remove('alt');
+  }
+
+  function legsOf(route) {
+    return route.map(function (s) {
+      var back = s.charAt(0) === '~';
+      return { id: back ? s.slice(1) : s, back: back };
+    });
+  }
+
+  function animateLeg(leg, tok) {
+    var el = edgeEls[leg.id];
+    var len = el.getTotalLength();
+    var dur = Math.max(420, len / 0.32);
+    return new Promise(function (resolve) {
+      var t0 = performance.now();
+      function frame(now) {
+        if (tok !== state.token) { resolve(); return; }
+        var p = Math.min(1, (now - t0) / dur);
+        var pt = el.getPointAtLength(leg.back ? len * (1 - p) : len * p);
+        packet.setAttribute('transform', 'translate(' + pt.x + ',' + pt.y + ')');
+        if (p < 1) requestAnimationFrame(frame); else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  function startPoint(leg) {
+    var el = edgeEls[leg.id];
+    var pt = el.getPointAtLength(leg.back ? el.getTotalLength() : 0);
+    packet.setAttribute('transform', 'translate(' + pt.x + ',' + pt.y + ')');
+  }
+
+  function followStep(step) {
+    if (scroller.scrollWidth <= scroller.clientWidth + 4) return;
+    var sum = 0;
+    step.n.forEach(function (id) { var n = nodeById[id]; sum += n.x + n.w / 2; });
+    var cx = sum / step.n.length;
+    var scale = svg.getBoundingClientRect().width / 1160;
+    scroller.scrollTo({ left: Math.max(0, cx * scale - scroller.clientWidth / 2), behavior: reduceMotion ? 'auto' : 'smooth' });
+  }
+
+  function renderCaption(i) {
+    var f = FLOWS[state.flow];
+    capTitle.textContent = f.title;
+    if (i < 0) {
+      capCount.textContent = '단계 ' + f.steps.length + '개';
+      capAlt.hidden = true;
+      capText.textContent = '▶ 재생을 누르면 데이터가 움직이는 모습을 단계별로 보여줍니다. 아래 목록에서 단계를 눌러 바로 볼 수도 있어요.';
+    } else {
+      capCount.textContent = (i + 1) + ' / ' + f.steps.length;
+      capAlt.hidden = !f.steps[i].alt;
+      capText.textContent = f.steps[i].text;
+    }
+    Array.prototype.forEach.call(stepsEl.querySelectorAll('.step-btn'), function (b, k) {
+      b.classList.toggle('active', k === i);
+      if (k === i) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+    });
+  }
+
+  function renderSteps() {
+    stepsEl.textContent = '';
+    FLOWS[state.flow].steps.forEach(function (s, i) {
+      var li = document.createElement('li');
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'step-btn' + (s.alt ? ' alt' : '');
+      var no = document.createElement('span'); no.className = 'no'; no.textContent = (i + 1) + '.';
+      var tx = document.createElement('span'); tx.textContent = (s.alt ? '[대안] ' : '') + s.text;
+      b.appendChild(no); b.appendChild(tx);
+      b.addEventListener('click', function () { jumpTo(i); });
+      li.appendChild(b);
+      stepsEl.appendChild(li);
+    });
+  }
+
+  function syncButtons() {
+    var last = state.idx >= steps().length - 1;
+    btnPlay.textContent = state.playing ? '⏸ 일시정지' : (state.idx >= 0 && last ? '↻ 처음부터' : '▶ 재생');
+    btnNext.disabled = false;
+    flowButtons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-flow') === state.flow)); });
+  }
+
+  async function showStep(i, tok) {
+    var step = steps()[i];
+    state.idx = i;
+    clearMarks();
+    renderCaption(i);
+    step.n.forEach(function (id) {
+      nodeEls[id].classList.add('on');
+      if (step.alt) nodeEls[id].classList.add('alt');
+    });
+    followStep(step);
+    for (var m = 0; m < step.moves.length; m++) {
+      if (tok !== state.token) return;
+      var move = step.moves[m];
+      var legs = legsOf(move.r);
+      legs.forEach(function (lg) {
+        edgeEls[lg.id].classList.add('on');
+        if (step.alt) edgeEls[lg.id].classList.add('alt');
+      });
+      if (reduceMotion) { await sleep(500); continue; }
+      packet.classList.toggle('alt', !!step.alt);
+      packetLabel.textContent = move.l;
+      startPoint(legs[0]);
+      packet.setAttribute('visibility', 'visible');
+      for (var k = 0; k < legs.length; k++) {
+        if (tok !== state.token) return;
+        await animateLeg(legs[k], tok);
+      }
+      if (tok !== state.token) return;
+      await sleep(260);
+    }
+    if (tok === state.token) packet.setAttribute('visibility', 'hidden');
+  }
+
+  async function runFrom(i) {
+    var tok = ++state.token;
+    state.playing = true;
+    syncButtons();
+    for (; i < steps().length; i++) {
+      await showStep(i, tok);
+      if (tok !== state.token) return;
+      await sleep(reduceMotion ? 1500 : 900);
+      if (tok !== state.token) return;
+    }
+    state.playing = false;
+    syncButtons();
+  }
+
+  function pause() {
+    state.token++;
+    state.playing = false;
+    packet.setAttribute('visibility', 'hidden');
+    syncButtons();
+  }
+
+  async function jumpTo(i) {
+    var tok = ++state.token;
+    state.playing = false;
+    syncButtons();
+    await showStep(i, tok);
+    if (tok === state.token) syncButtons();
+  }
+
+  function selectFlow(key, autoplay) {
+    state.token++;
+    state.playing = false;
+    state.flow = key;
+    state.idx = -1;
+    clearMarks();
+    renderSteps();
+    renderCaption(-1);
+    scroller.scrollTo({ left: 0 });
+    syncButtons();
+    if (autoplay) runFrom(0);
+  }
+
+  flowButtons.forEach(function (b) {
+    b.addEventListener('click', function () { selectFlow(b.getAttribute('data-flow'), true); });
+  });
+  btnPlay.addEventListener('click', function () {
+    if (state.playing) { pause(); return; }
+    var last = steps().length - 1;
+    runFrom(state.idx < 0 || state.idx >= last ? 0 : state.idx);
+  });
+  btnNext.addEventListener('click', function () {
+    var next = state.idx + 1 >= steps().length ? 0 : state.idx + 1;
+    jumpTo(next);
+  });
+
+  selectFlow('f1', false);
+})();
+</script>
+</body>
+</html>
