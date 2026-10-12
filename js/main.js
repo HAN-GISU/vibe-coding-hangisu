@@ -76,6 +76,24 @@
 
   function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
 
+  /* ---------- 숙제 메모 (숙제마다 하나, 리셋돼도 남는 고정 메모) ---------- */
+
+  // 숙제 이름 옆 ✎ 버튼. 눌리는 것은 아래 위임 클릭 처리기가 받는다.
+  function memoButton(t) {
+    return el('button', { type: 'button', class: 'memo-btn', 'data-memo': t.id, text: '✎', 'aria-label': t.name + ' 메모', title: '메모' });
+  }
+
+  // 메모 표시를 맞춘다. 요소는 처음부터 만들어 두고 글자와 hidden만 바꾼다 (메모를 처음 쓰거나 지워도 목록을 다시 만들지 않는다).
+  function patchMemo(t, btn, line, item) {
+    var memo = typeof t.memo === 'string' ? t.memo : '';
+    if (btn) {
+      btn.classList.toggle('has-memo', memo !== '');
+      btn.title = memo !== '' ? '메모 고치기' : '메모 쓰기';
+    }
+    if (line) { setText(line, memo); line.hidden = memo === ''; }
+    if (item) { setText(item.text, memo); item.li.hidden = memo === ''; }
+  }
+
   /* ---------- 구조 만들기 ---------- */
 
   // withPresets: 게임이 없을 때 설정 화면의 프리셋 영역(settings.html#presets)으로 가는 버튼도 보여 준다 (이 파일은 프리셋 데이터를 모른다)
@@ -121,7 +139,7 @@
   function groupBlock(gm, gg) {
     var g = gg.group;
     var ref = { mark: el('span', { class: 'gb-mark', hidden: true, role: 'img', 'aria-label': '완료', text: '✓' }),
-      progress: el('span', { class: 'gb-progress' }), remaining: el('span', { class: 'gb-remaining' }), rows: Object.create(null), nodes: Object.create(null), tasks: Object.create(null), cols: Object.create(null) };
+      progress: el('span', { class: 'gb-progress' }), remaining: el('span', { class: 'gb-remaining' }), rows: Object.create(null), nodes: Object.create(null), tasks: Object.create(null), cols: Object.create(null), memoBtns: Object.create(null), memoItems: Object.create(null) };
     state.refs[g.id] = ref;
     var head = el('div', { class: 'gb-head' }, [
       ref.mark, el('strong', { class: 'gb-name', text: g.name }),
@@ -142,10 +160,12 @@
     gg.tasks.forEach(function (t) {
       var box = el('input', { type: 'checkbox', 'data-cell': '1', 'data-task': t.id });
       var rem = el('span', { class: 'trow-remaining' });
+      var memoBtn = memoButton(t);
+      var memoLine = el('p', { class: 'memo-line', hidden: true });
       var li = el('li', { class: 'trow', 'data-task': t.id }, [
-        el('label', { class: 'check' }, [box, el('span', { class: 'row-name', text: t.name }), t.low ? badge('낮음') : null]), rem
+        el('label', { class: 'check' }, [box, el('span', { class: 'row-name', text: t.name }), t.low ? badge('낮음') : null]), memoBtn, rem, memoLine
       ]);
-      ref.tasks[t.id] = { li: li, box: box, rem: rem };
+      ref.tasks[t.id] = { li: li, box: box, rem: rem, memoBtn: memoBtn, memoLine: memoLine };
       ref.list.appendChild(li);
     });
     return ref.list;
@@ -158,7 +178,9 @@
     gg.tasks.forEach(function (t) {
       var b = el('button', { type: 'button', class: 'col-head', 'data-col': t.id, 'data-group': g.id, text: t.name, title: '이 숙제를 표의 모든 폴더에 한 번에 완료 처리' });
       ref.cols[t.id] = b;
-      headRow.appendChild(el('th', { scope: 'col' }, [b, t.low ? badge('낮음') : null]));
+      var mb = memoButton(t);
+      ref.memoBtns[t.id] = mb;
+      headRow.appendChild(el('th', { scope: 'col' }, [b, mb, t.low ? badge('낮음') : null]));
     });
     headRow.appendChild(el('th', { class: 'pcol', scope: 'col', text: '진행' }));
     var tbody = el('tbody');
@@ -193,7 +215,14 @@
     });
     var table = el('table', { class: 'board', 'aria-label': g.name + ' 표' }, [el('thead', {}, [headRow]), tbody]);
     ref.table = table;
-    return el('div', { class: 'board-wrap' }, [table]);
+    // 메모 목록: 메모가 있는 숙제만 보인다 (비어 있으면 hidden, 처음 쓰거나 지울 때도 요소를 새로 만들지 않고 hidden만 바꾼다)
+    var memoItems = gg.tasks.map(function (t) {
+      var text = el('span', { class: 'memo-text' });
+      var item = el('li', { class: 'memo-item', hidden: true }, [el('button', { type: 'button', class: 'memo-open', 'data-memo': t.id }, [el('strong', { class: 'memo-task', text: t.name }), text])]);
+      ref.memoItems[t.id] = { li: item, text: text };
+      return item;
+    });
+    return el('div', { class: 'board-wrap' }, [table, el('ul', { class: 'memo-list', 'aria-label': g.name + ' 메모' }, memoItems)]);
   }
 
   /* ---------- 갱신 (제자리 바꾸기) ---------- */
@@ -232,6 +261,7 @@
       var s = byTask[t.id];
       r.li.hidden = !s; // 그 기간에 아직 없던 숙제(과거 ?now=)는 목록에서 숨긴다
       if (!s) return;
+      patchMemo(t, r.memoBtn, r.memoLine);
       r.box.checked = s.state === 'done';
       r.box.disabled = s.state === 'skipped';
       r.li.classList.toggle('is-done', s.state === 'done');
@@ -257,6 +287,7 @@
   function patchBoard(ref, gg) {
     var g = gg.group;
     gg.columns.forEach(function (c) {
+      patchMemo(c.task, ref.memoBtns[c.task.id], null, ref.memoItems[c.task.id]);
       var b = ref.cols[c.task.id];
       if (b) { b.disabled = c.pending === 0; b.title = c.pending === 0 ? '완료 처리할 폴더가 없어요' : '이 숙제를 안 한 ' + c.pending + '곳에 한 번에 완료 처리'; }
     });
@@ -486,6 +517,28 @@
     });
   }
 
+  // 메모 창: 숙제 하나의 메모를 쓰고 고친다. 비우고 저장하면 지워진다. 입력 칸은 창(<dialog>) 안에 있어서 목록이 다시 그려져도
+  // 입력하던 글이 사라지지 않는다 (창이 열려 있는 동안은 refresh도 미뤄진다).
+  function openMemo(taskId) {
+    var task = null;
+    Store.get().tasks.forEach(function (t) { if (t.id === taskId) task = t; });
+    if (!task) { refresh(true); return; }
+    var area = el('textarea', { class: 'textarea', id: UI.nextId('f'), rows: 5, maxlength: 300, spellcheck: 'false' });
+    area.value = typeof task.memo === 'string' ? task.memo : '';
+    var counter = el('span', { class: 'muted memo-count' });
+    function count() { counter.textContent = area.value.length + '/300'; }
+    area.addEventListener('input', count);
+    count();
+    UI.modal({
+      title: '"' + task.name + '" 메모', description: '이 숙제 하나에 남는 메모예요. 리셋돼도 남고, 캐릭터(폴더)마다 따로 두지 않아요. 비우고 저장하면 지워져요.',
+      body: el('div', {}, [UI.field('메모', area), counter]), submitLabel: '저장',
+      onSubmit: function () {
+        var r = Store.apply(function (d) { return Store.ops.setMemo(d, taskId, area.value); });
+        return r.ok ? { ok: true } : r;
+      }
+    }).then(function () { refresh(true); });
+  }
+
   function onToggle(btn) {
     var key = btn.getAttribute('data-toggle');
     state.collapsed[key] = !state.collapsed[key];
@@ -505,6 +558,7 @@
     if (!b || !host.contains(b)) return;
     if (b.hasAttribute('data-col')) onColumn(b);
     else if (b.hasAttribute('data-toggle')) onToggle(b);
+    else if (b.hasAttribute('data-memo')) openMemo(b.getAttribute('data-memo'));
   });
 
   // 눌려 있는 동안에는 다시 그리지 않는다 (누른 칸이 바뀌어 클릭이 사라지는 것을 막는다)

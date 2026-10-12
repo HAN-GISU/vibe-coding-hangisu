@@ -324,6 +324,22 @@ a.btn { text-decoration: none; } /* 링크에 버튼 모양을 입힌 것 (밑�
 .trow:first-child { border-top: 0; }
 .trow .check { flex: 1; min-width: 0; }
 .trow-remaining { color: var(--muted-foreground); font-size: 13px; text-align: right; }
+.trow { flex-wrap: wrap; }
+/* 숙제 메모: ✎ 버튼과 표시 줄 (메모가 없으면 표시 줄은 hidden이라 높이를 쓰지 않는다) */
+.memo-btn { flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; line-height: 1; }
+.memo-btn:hover { background: var(--accent); }
+.memo-btn.has-memo { color: var(--foreground); border-color: var(--foreground); }
+.memo-line, .memo-text { white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.memo-line { flex: 1 1 calc(100% - 28px); min-width: 0; margin: 0 0 4px 28px; font-size: 13px; color: var(--muted-foreground); }
+.trow .badge { flex: none; white-space: nowrap; }
+.memo-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.memo-item { border-top: 1px solid var(--border); }
+.memo-open { display: block; width: 100%; padding: 8px 4px; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.memo-open:hover { background: var(--accent); }
+.memo-task { display: block; font-size: 13px; }
+.memo-text { font-size: 13px; color: var(--muted-foreground); }
+.memo-count { display: block; margin-top: 4px; font-size: 12px; text-align: right; }
+@media (pointer: coarse) { .memo-btn { width: 36px; height: 36px; } }
 .trow.is-done, .trow.is-skipped { opacity: 0.55; }
 
 .board-wrap { margin-top: 8px; overflow-x: auto; }
