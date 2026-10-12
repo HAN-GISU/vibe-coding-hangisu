@@ -985,7 +985,152 @@
       return moveWithin(d.tasks, taskId, delta, function (x) { return x.groupId === t.groupId; });
     }
 
+    /* ----- 체크 (메인 화면, 4단계) ----- */
+    // at은 체크한 시각(Reset.now()). 판정은 모두 reset.js(Reset)에 맡기고, 여기서는 그 결과로 기록을 쌓거나 지우기만 한다.
+
+    function groupContext(d, groupId) {
+      var group = findGroup(d, groupId);
+      if (!group) return null;
+      var game = findGame(d, group.gameId);
+      var cycle = null;
+      game.cycles.forEach(function (c) { if (c.id === group.cycleId) cycle = c; });
+      return { group: group, game: game, cycle: cycle };
+    }
+    function evalFolder(d, ctx, folderId, at) {
+      return global.Reset.evaluateGroup({ group: ctx.group, cycle: ctx.cycle, tasks: d.tasks, folders: ctx.game.folders, folderId: folderId,
+        records: d.records, groupRecords: d.groupRecords, at: at });
+    }
+    // 묶음의 범위 단계 폴더들. rootFolderId가 null이면 게임 전체, 아니면 그 폴더와 아래 폴더 중에서.
+    function scopeFolders(ctx, rootFolderId) {
+      var tree = rootFolderId === null ? ctx.game.folders : subtree(ctx.game, rootFolderId);
+      return tree.filter(function (f) { return f.level === ctx.group.scope; });
+    }
+    function validAt(at) { return at instanceof Date && !isNaN(at.getTime()); }
+    var BAD_AT = '시각이 올바르지 않아요.';
+
+    // 폴더 체크 대상의 공통 검사: 범위 단계 이하의 폴더여야 한다.
+    function folderContext(d, groupId, folderId) {
+      var ctx = groupContext(d, groupId);
+      if (!ctx) return { error: '묶음을 찾을 수 없어요.' };
+      if (typeof ctx.group.scope !== 'number') return { error: '게임 공통 묶음에는 폴더 체크가 없어요.' };
+      var loc = typeof folderId === 'string' ? findFolder(d, folderId) : null;
+      if (!loc || loc.game.id !== ctx.game.id) return { error: '폴더를 찾을 수 없어요.' };
+      if (loc.folder.level > ctx.group.scope) {
+        return { error: '이 묶음은 "' + ctx.game.levels[ctx.group.scope - 1] + '" 단계의 폴더마다 체크해요. 그보다 아래 폴더는 체크할 수 없어요.' };
+      }
+      return { ctx: ctx };
+    }
+
+    // 칸 하나 체크: 그 칸이 이번 기간에 완료가 아니면 완료 기록 하나. 이미 완료면 noop.
+    function checkTask(d, taskId, folderId, at) {
+      if (!validAt(at)) return fail(BAD_AT);
+      var task = findTask(d, taskId); if (!task) return fail('숙제를 찾을 수 없어요.');
+      var ctx = groupContext(d, task.groupId);
+      var fid = folderId === undefined || folderId === null ? null : folderId;
+      if (typeof ctx.group.scope !== 'number') {
+        if (fid !== null) return fail('게임 공통 숙제에는 폴더가 없어요.');
+      } else {
+        var loc = typeof fid === 'string' ? findFolder(d, fid) : null;
+        if (!loc || loc.game.id !== ctx.game.id || loc.folder.level !== ctx.group.scope) {
+          return fail('이 숙제는 "' + ctx.game.levels[ctx.group.scope - 1] + '" 단계의 폴더마다 체크해요.');
+        }
+        if (global.Reset.isOff(ctx.game.folders, fid, task.id) || global.Reset.isOff(ctx.game.folders, fid, ctx.group.id)) {
+          return fail('이 폴더에서는 하지 않는 숙제예요.');
+        }
+      }
+      if (global.Reset.isTaskDone({ cycle: ctx.cycle, taskId: taskId, folderId: fid, records: d.records, at: at })) return { ok: true, noop: true };
+      d.records.push({ taskId: taskId, folderId: fid, doneAt: global.Reset.formatIso(at) });
+      return { ok: true, added: 1 };
+    }
+
+    // 칸 하나 해제: 그 숙제·그 폴더의 이번 기간 기록만 지운다. 지난 기간 기록은 건드리지 않는다.
+    function uncheckTask(d, taskId, folderId, at) {
+      if (!validAt(at)) return fail(BAD_AT);
+      var task = findTask(d, taskId); if (!task) return fail('숙제를 찾을 수 없어요.');
+      var ctx = groupContext(d, task.groupId);
+      var fid = folderId === undefined || folderId === null ? null : folderId;
+      var period = global.Reset.currentPeriod(ctx.cycle, at);
+      var removed = 0;
+      d.records = d.records.filter(function (r) {
+        var hit = r.taskId === taskId && (r.folderId == null ? null : r.folderId) === fid && global.Reset.inPeriod(r.doneAt, period);
+        if (hit) removed++;
+        return !hit;
+      });
+      return removed ? { ok: true, removed: removed } : { ok: true, noop: true };
+    }
+
+    // 폴더 체크 (위 단계 폴더도 된다): 그 폴더와 아래 폴더 중 묶음 범위 단계의 폴더마다 완료 처리한다.
+    //   묶음을 끈 폴더, 활성 숙제가 없는 폴더, 이미 완료인 폴더는 건너뛴다.
+    //   필요 개수가 있는 묶음은 폴더마다 묶음 완료 기록 하나, 없으면 끄지 않은 숙제 중 이번 기간에 안 한 것 전부에 완료 기록.
+    function checkFolder(d, groupId, folderId, at) {
+      if (!validAt(at)) return fail(BAD_AT);
+      var fc = folderContext(d, groupId, folderId); if (fc.error) return fail(fc.error);
+      var ctx = fc.ctx;
+      var doneAt = global.Reset.formatIso(at);
+      var folders = 0, records = 0, groupRecords = 0;
+      scopeFolders(ctx, folderId).forEach(function (f) {
+        var e = evalFolder(d, ctx, f.id, at);
+        if (e.off || e.empty || e.done) return;
+        folders++;
+        if (ctx.group.required != null) {
+          d.groupRecords.push({ groupId: groupId, folderId: f.id, doneAt: doneAt });
+          groupRecords++;
+        } else {
+          e.tasks.forEach(function (s) {
+            if (s.state !== 'todo') return;
+            d.records.push({ taskId: s.taskId, folderId: f.id, doneAt: doneAt });
+            records++;
+          });
+        }
+      });
+      return records || groupRecords ? { ok: true, folders: folders, records: records, groupRecords: groupRecords } : { ok: true, noop: true };
+    }
+
+    // 열 머리 체크: 그 숙제를 범위 단계의 모든 폴더에 완료 처리한다.
+    //   그 숙제나 묶음을 끈 폴더, 이미 한 폴더, 묶음이 완료돼 회색인 폴더는 건너뛴다.
+    function checkColumn(d, taskId, at) {
+      if (!validAt(at)) return fail(BAD_AT);
+      var task = findTask(d, taskId); if (!task) return fail('숙제를 찾을 수 없어요.');
+      var ctx = groupContext(d, task.groupId);
+      if (typeof ctx.group.scope !== 'number') return fail('게임 공통 숙제에는 열 머리 체크가 없어요.');
+      var doneAt = global.Reset.formatIso(at);
+      var records = 0;
+      scopeFolders(ctx, null).forEach(function (f) {
+        var e = evalFolder(d, ctx, f.id, at);
+        if (e.off || e.empty) return;
+        e.tasks.forEach(function (s) {
+          if (s.taskId !== taskId || s.state !== 'todo') return;
+          d.records.push({ taskId: taskId, folderId: f.id, doneAt: doneAt });
+          records++;
+        });
+      });
+      return records ? { ok: true, records: records } : { ok: true, noop: true };
+    }
+
+    // 폴더 체크 해제: 대상 폴더들에서 그 묶음 숙제들의 이번 기간 기록과 묶음 완료 기록만 지운다.
+    function uncheckFolder(d, groupId, folderId, at) {
+      if (!validAt(at)) return fail(BAD_AT);
+      var fc = folderContext(d, groupId, folderId); if (fc.error) return fail(fc.error);
+      var ctx = fc.ctx;
+      var period = global.Reset.currentPeriod(ctx.cycle, at);
+      var targets = toSet(scopeFolders(ctx, folderId).map(function (f) { return f.id; }));
+      var taskIds = toSet(d.tasks.filter(function (t) { return t.groupId === groupId; }).map(function (t) { return t.id; }));
+      var removed = 0;
+      d.records = d.records.filter(function (r) {
+        var hit = taskIds[r.taskId] && r.folderId != null && targets[r.folderId] && global.Reset.inPeriod(r.doneAt, period);
+        if (hit) removed++;
+        return !hit;
+      });
+      d.groupRecords = d.groupRecords.filter(function (r) {
+        var hit = r.groupId === groupId && r.folderId != null && targets[r.folderId] && global.Reset.inPeriod(r.doneAt, period);
+        if (hit) removed++;
+        return !hit;
+      });
+      return removed ? { ok: true, removed: removed } : { ok: true, noop: true };
+    }
+
     return {
+      checkTask: checkTask, uncheckTask: uncheckTask, checkFolder: checkFolder, checkColumn: checkColumn, uncheckFolder: uncheckFolder,
       addGame: addGame, renameGame: renameGame, impactGame: impactGame, deleteGame: deleteGame, moveGame: moveGame,
       addCycle: addCycle, updateCycle: updateCycle, canDeleteCycle: canDeleteCycle, deleteCycle: deleteCycle,
       addLevelBelow: addLevelBelow, addLevelAbove: addLevelAbove, renameLevel: renameLevel, impactLevel: impactLevel, canDeleteLevel: canDeleteLevel, deleteLevel: deleteLevel,
@@ -1154,6 +1299,20 @@
       });
     }
 
+    // 체크·해제 (메인 화면): { taskId?, groupId?, folderId?, at? }. at이 없으면 지금(Reset.now()). 한 번의 호출 = 한 번의 저장.
+    function checkCall(opName, pick) {
+      return function (a) {
+        if (!isObj(a)) return { ok: false, error: '조건이 올바르지 않아요.' };
+        var at = a.at === undefined ? global.Reset.now() : a.at;
+        return apply(function (d) { return ops[opName].apply(null, [d].concat(pick(a)).concat([at])); });
+      };
+    }
+    var checkTask = checkCall('checkTask', function (a) { return [a.taskId, a.folderId]; });
+    var uncheckTask = checkCall('uncheckTask', function (a) { return [a.taskId, a.folderId]; });
+    var checkFolder = checkCall('checkFolder', function (a) { return [a.groupId, a.folderId]; });
+    var uncheckFolder = checkCall('uncheckFolder', function (a) { return [a.groupId, a.folderId]; });
+    var checkColumn = checkCall('checkColumn', function (a) { return [a.taskId]; });
+
     function validDate(x) { return x instanceof Date && !isNaN(x.getTime()); }
 
     // 체크 해제용: 기간 안에 있는 기록만 지운다. 기간 밖 기록은 건드리지 않는다.
@@ -1277,6 +1436,7 @@
     return {
       load: load, status: status, get: get, update: update, apply: apply,
       addRecords: addRecords, removeRecordsInPeriod: removeRecordsInPeriod,
+      checkTask: checkTask, uncheckTask: uncheckTask, checkFolder: checkFolder, checkColumn: checkColumn, uncheckFolder: uncheckFolder,
       exportJson: exportJson, importJson: importJson,
       rawText: rawText, startFresh: startFresh, newId: newId
     };

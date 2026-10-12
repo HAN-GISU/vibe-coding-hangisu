@@ -418,6 +418,108 @@
     return { status: ev.done ? 'missed-group-met' : 'missed', doneAt: null };
   }
 
+  /* ---------- 게임 목록 판정 (메인 화면) ---------- */
+
+  // 게임 하나의 모든 묶음을 한 번에 판정한다. 화면(main.js)은 이 결과를 그리기만 한다.
+  // args: { game, groups(전체 묶음), tasks(전체 숙제), records, groupRecords, at }
+  // 돌려주는 값: { game, groups: [묶음마다 { group, cycle, tasks, remaining, remainingMs, kind, … }] }
+  //   kind 'game'(게임 공통): ev(evaluateGroup 결과), summary
+  //   kind 'folders'(단계 범위): nodes(트리 순서 [{ folder, depth, isRow, parentId, ev?, checkbox }]), byId, columns, summary
+  //   checkbox: { state: 'hidden' | 'none' | 'some' | 'all', targets, done, pending }
+  //     행(범위 단계 폴더)이면 그 폴더 하나, 위 단계 폴더이면 그 아래 행 중 이 묶음을 끄지 않은 폴더들을 센다.
+  //   columns: [{ task, pending }]  pending = 열 머리를 누르면 완료 처리될 폴더 수
+  function evaluateGame(args) {
+    var game = args.game;
+    var at = args.at;
+    var records = args.records || [];
+    var groupRecords = args.groupRecords || [];
+    var cycleById = Object.create(null);
+    game.cycles.forEach(function (c) { cycleById[c.id] = c; });
+
+    var groups = args.groups.filter(function (g) { return g.gameId === game.id; }).map(function (group) {
+      var cycle = cycleById[group.cycleId];
+      var tasks = args.tasks.filter(function (t) { return t.groupId === group.id; });
+      var taskIds = Object.create(null);
+      tasks.forEach(function (t) { taskIds[t.id] = true; });
+      var gRecords = records.filter(function (r) { return taskIds[r.taskId]; });
+      var gGroupRecords = groupRecords.filter(function (r) { return r.groupId === group.id; });
+      var remaining = describeRemaining(cycle, at);
+      var out = {
+        group: group, cycle: cycle, tasks: tasks, remaining: remaining,
+        remainingMs: remaining.ms === null ? [] : [remaining.ms],
+        kind: group.scope === 'game' ? 'game' : 'folders'
+      };
+      function evalAt(folderId) {
+        return evaluateGroup({ group: group, cycle: cycle, tasks: tasks, folders: game.folders, folderId: folderId,
+          records: gRecords, groupRecords: gGroupRecords, at: at });
+      }
+
+      if (out.kind === 'game') {
+        out.ev = evalAt(null);
+        out.summary = { empty: out.ev.empty, anyPending: !out.ev.empty && !out.ev.done, allDone: !out.ev.empty && out.ev.done };
+        return out;
+      }
+
+      // 단계 범위: 범위 단계까지의 폴더를 트리 순서로
+      var kids = Object.create(null);
+      game.folders.forEach(function (f) {
+        if (f.level > group.scope) return;
+        var key = f.parentId == null ? '' : f.parentId;
+        (kids[key] = kids[key] || []).push(f);
+      });
+      var nodes = [];
+      var byId = Object.create(null);
+      function walk(parentKey) {
+        (kids[parentKey] || []).forEach(function (f) {
+          var node = { folder: f, depth: f.level - 1, isRow: f.level === group.scope, parentId: f.parentId == null ? null : f.parentId };
+          nodes.push(node);
+          byId[f.id] = node;
+          if (node.isRow) node.ev = evalAt(f.id);
+          else walk(f.id);
+        });
+      }
+      walk('');
+
+      // 위 단계 폴더의 체크박스는 아래 행들을 모아서 계산한다
+      var agg = Object.create(null);
+      nodes.forEach(function (n) { if (!n.isRow) agg[n.folder.id] = { targets: 0, done: 0, partial: false }; });
+      var columns = tasks.map(function (t) { return { task: t, pending: 0 }; });
+      var anyPending = false, anyActive = false;
+      nodes.forEach(function (n) {
+        if (!n.isRow) return;
+        var e = n.ev;
+        var state = e.off || e.empty ? 'hidden' : (e.done ? 'all' : (e.doneCount > 0 ? 'some' : 'none'));
+        n.checkbox = { state: state, targets: state === 'hidden' ? 0 : 1, done: state === 'all' ? 1 : 0, pending: state === 'hidden' || state === 'all' ? 0 : 1 };
+        if (state === 'hidden') return;
+        anyActive = true;
+        if (state !== 'all') anyPending = true;
+        e.tasks.forEach(function (s, i) { if (s.state === 'todo') columns[i].pending += 1; });
+        var up = n.parentId, seen = Object.create(null);
+        while (up != null && agg[up] && !seen[up]) {
+          seen[up] = true;
+          agg[up].targets += 1;
+          if (state === 'all') agg[up].done += 1;
+          if (state === 'some') agg[up].partial = true;
+          up = byId[up] ? byId[up].parentId : null;
+        }
+      });
+      nodes.forEach(function (n) {
+        if (n.isRow) return;
+        var a = agg[n.folder.id];
+        var st = a.targets === 0 ? 'hidden' : (a.done === a.targets ? 'all' : (a.done > 0 || a.partial ? 'some' : 'none'));
+        n.checkbox = { state: st, targets: a.targets, done: a.done, pending: a.targets - a.done };
+      });
+
+      out.nodes = nodes;
+      out.byId = byId;
+      out.columns = columns;
+      out.summary = { empty: !anyActive, anyPending: anyPending, allDone: anyActive && !anyPending };
+      return out;
+    });
+
+    return { game: game, groups: groups };
+  }
+
   /* ---------- 남은 기간 ---------- */
 
   // 다음 리셋까지 남은 시간(ms). 1회는 null.
@@ -537,6 +639,7 @@
     inPeriod: inPeriod,
     isTaskDone: isTaskDone,
     evaluateGroup: evaluateGroup,
+    evaluateGame: evaluateGame,
     periodStatus: periodStatus,
     remainingMs: remainingMs,
     formatRemaining: formatRemaining,
