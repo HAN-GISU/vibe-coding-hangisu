@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>reset.js · store.js 테스트</title>
-  <link rel="stylesheet" href="../css/style.css?v=20261012-15">
+  <link rel="stylesheet" href="../css/style.css?v=20261012-17">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
     .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
@@ -50,10 +50,10 @@
   <div id="out"></div>
 </main>
 
-<script src="../js/reset.js?v=20261012-15"></script>
-<script src="../js/store.js?v=20261012-15"></script>
-<script src="../js/ui.js?v=20261012-15"></script>
-<script src="../js/presets.js?v=20261012-15"></script>
+<script src="../js/reset.js?v=20261012-17"></script>
+<script src="../js/store.js?v=20261012-17"></script>
+<script src="../js/ui.js?v=20261012-17"></script>
+<script src="../js/presets.js?v=20261012-17"></script>
 <script>
 (function () {
   'use strict';
@@ -387,7 +387,7 @@
     eq('캐릭터2도 끈 것', function () { return R.isOff(F, 'c2', 'tD'); }, true);
     eq('다른 계정(부계정) 아래 캐릭터3은 끄지 않았다', function () { return R.isOff(F, 'c3', 'tD'); }, false);
     eq('끄지 않은 숙제', function () { return R.isOff(F, 'c1', 'tA'); }, false);
-    eq('게임 공통(folderId가 null)은 항상 false', function () { return R.isOff(F, null, 'tD'); }, false);
+    eq('게임 공통(folderId가 null)은 어떤 항목도 끄지 않는다 (끈 숙제 tD, 안 끈 tA, 묶음 id g)', function () { return ['tD', 'tA', 'g'].map(function (id) { return R.isOff(F, null, id); }); }, [false, false, false]);
     eq('없는 폴더 id는 false', function () { return R.isOff(F, 'zzz', 'tD'); }, false);
     eq('아래 폴더가 끈 것은 위 폴더에 영향이 없다', function () { var f2 = clone(F); f2[1].off = ['tX']; return [R.isOff(f2, 'c1', 'tX'), R.isOff(f2, 'a1', 'tX'), R.isOff(f2, 'c2', 'tX')]; }, [true, false, false]);
     eq('폴더가 150단계로 깊어도 맨 위 폴더가 끈 항목을 찾는다', function () {
@@ -475,7 +475,7 @@
     has('숙제를 전부 끈 폴더도 이번 기간의 묶음 완료 기록이 있으면 완료', function () { var f = clone(F); f[0].off = ['tA', 'tB', 'tC']; return ev({ folders: f, folderId: 'c1', group: { id: 'g', scope: 2, required: null }, groupRecords: [grec('g', 'c1', today)] }); }, { done: true, byGroupRecord: true, total: 0 });
     has('같은 경우 지난 기간의 묶음 완료 기록이면 empty', function () { var f = clone(F); f[0].off = ['tA', 'tB', 'tC']; return ev({ folders: f, folderId: 'c1', group: { id: 'g', scope: 2, required: null }, groupRecords: [grec('g', 'c1', D(10, 14, 21, 0))] }); }, { done: false, empty: true });
     has('숙제가 전부 꺼진 묶음도 empty', function () { var f = clone(F); f[0].off = ['tA', 'tB', 'tC']; return ev({ folders: f, folderId: 'c1' }); }, { empty: true, done: false });
-    has('필요 개수가 0이나 음수면 전부 해야 완료로 본다', function () { return ev({ group: { id: 'g', scope: 'game', required: 0 } }); }, { need: 3 });
+    eq('필요 개수가 0이나 음수면 전부(3개) 해야 완료로 본다', function () { return [0, -1].map(function (v) { var r = ev({ group: { id: 'g', scope: 'game', required: v } }); return [r.need, r.done]; }); }, [[3, false], [3, false]]);
     eq('다른 묶음의 숙제는 섞이지 않는다', function () { return ev({ tasks: tasks3.concat([task('x', 'other')]) }).total; }, 3);
   });
 
@@ -1817,9 +1817,11 @@
         return [hsec(base, 'fc1').groups[1].tasks.map(function (t) { return t.task.id; }), hsec(base, 'fc3').groups[1].tasks.map(function (t) { return t.task.id; })];
       }, [['tk3', 'tk6'], ['tk3', 'tk4', 'tk6']]);
       eq('끈 묶음은 그 폴더 구획에서 빠진다 (본계정이 일일 퀘스트를 끔)', function () { var d = board(); d.games[0].folders[0].off = ['gr1']; return hsec(bh(d), 'fc1').groups.map(function (g) { return g.group.id; }); }, ['gr2']);
-      eq('숙제를 전부 끈 폴더는 그 묶음이 빠지고, 모든 묶음이 빠지면 구획도 없다', function () {
-        var d = board(); d.games[0].folders[1].off = ['tk1', 'tk2', 'tk3', 'tk6']; var h = bh(d); return [hsec(h, 'fc1') === undefined, hsec(h, 'fc2') !== undefined];
-      }, [true, true]);
+      eq('숙제를 전부 끈 묶음만 그 폴더 구획에서 빠지고(일일 퀘스트 tk1·tk2를 끔), 모든 묶음의 숙제를 끄면 그 폴더 구획 자체가 없다 (다른 폴더는 그대로)', function () {
+        var a = board(); a.games[0].folders[1].off = ['tk1', 'tk2']; var ha = bh(a);
+        var d = board(); d.games[0].folders[1].off = ['tk1', 'tk2', 'tk3', 'tk6']; var h = bh(d);
+        return [hsec(ha, 'fc1').groups.map(function (g) { return g.group.id; }), hsec(h, 'fc1') === undefined, hsec(h, 'fc2') !== undefined];
+      }, [['gr2'], true, true]);
       eq('기본 10개: 숙제를 만든 기간(9/30 05:00~)부터 지금까지 16기간 중 10개만, 더 있음, 잘림 아님', function () {
         var t = hte(base, 'fc1', 'gr1', 'tk1'); return [t.shown, t.total, t.more, t.truncated, t.rows[0].period.isCurrent, t.rows[1].period.isCurrent];
       }, [10, 16, true, false, true, false]);

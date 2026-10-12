@@ -382,6 +382,7 @@ table.board { width: 100%; border-collapse: collapse; }
 .urgent-items { margin: 0; padding: 0; list-style: none; }
 .urgent-item { padding: 4px 0; font-size: 13px; overflow-wrap: anywhere; }
 .u-where { color: var(--muted-foreground); }
+.urgent-more { display: none; margin: 6px 0 0; font-size: 13px; color: var(--muted-foreground); }
 
 @media (max-width: 860px) {
   .main-layout.has-sidebar { grid-template-columns: 1fr; }
@@ -389,6 +390,9 @@ table.board { width: 100%; border-collapse: collapse; }
   .side-toggle { display: inline-flex; align-items: center; justify-content: center; }
   .side-toggle[hidden] { display: none; }
   .urgent-list.is-collapsed .urgent-bucket:nth-child(n+2) { display: none; }
+  .urgent-list.is-collapsed .urgent-bucket:first-child .urgent-item:nth-child(n+4) { display: none; }
+  .urgent-list.is-collapsed .urgent-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .urgent-list.is-collapsed .urgent-more { display: block; }
 }
 /* 폰처럼 좁으면 D-N만 보이고 남은 시간 상세는 스크린리더용으로만 남긴다 */
 @media (max-width: 639px) {

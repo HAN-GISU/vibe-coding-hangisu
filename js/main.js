@@ -276,7 +276,7 @@
         r.tr.classList.toggle('is-collapsed', closed);
         r.tr.classList.toggle('is-off', n.ev.empty);
         r.tr.classList.toggle('is-done', n.ev.done);
-        setText(r.prog, n.ev.off ? '안 함' : progressText(n.ev));
+        setText(r.prog, n.ev.off ? '하지 않는 폴더' : progressText(n.ev));
         var byTask = Object.create(null);
         n.ev.tasks.forEach(function (x) { byTask[x.taskId] = x; });
         r.cells.forEach(function (c, i) {
@@ -294,7 +294,8 @@
 
   /* ---------- 사이드바: 급한 순서 (보기만 한다) ---------- */
 
-  var side = { card: null, list: null, toggle: null, sig: null, open: false };
+  var side = { card: null, list: null, toggle: null, sig: null, open: false, buckets: 0, firstCount: 0, total: 0 };
+  var SIDE_LINES = 3; // 좁은 화면에서 접힌 상태일 때 가장 급한 덩어리에서 보이는 줄 수
 
   function buildSide() {
     side.toggle = el('button', { type: 'button', class: 'btn btn-sm side-toggle', 'aria-controls': 'urgent-list', 'aria-expanded': 'false', text: '더 보기' });
@@ -307,9 +308,10 @@
     sidebar.appendChild(side.card);
   }
 
-  // 좁은 화면에서는 가장 급한 덩어리 하나만 보이고 나머지는 접는다 (CSS가 .is-collapsed로 숨긴다)
+  // 좁은 화면에서는 접은 상태로 가장 급한 덩어리의 앞 3줄과 "외 N줄"만 보인다 (CSS가 .is-collapsed로 숨긴다).
+  // 줄이 3개를 넘거나 덩어리가 둘 이상이면 [더 보기]가 나온다.
   function applySideOpen() {
-    var many = side.list.children.length > 1;
+    var many = side.buckets > 1 || side.firstCount > SIDE_LINES;
     side.list.classList.toggle('is-collapsed', !side.open);
     side.toggle.hidden = !many;
     side.toggle.setAttribute('aria-expanded', side.open ? 'true' : 'false');
@@ -339,6 +341,11 @@
         el('ul', { class: 'urgent-items' }, b.items.map(sideItem))
       ]));
     });
+    side.buckets = buckets.length;
+    side.firstCount = buckets.length ? buckets[0].items.length : 0;
+    side.total = buckets.reduce(function (n, b) { return n + b.items.length; }, 0);
+    var hidden = side.total - Math.min(SIDE_LINES, side.firstCount);
+    if (hidden > 0) side.list.appendChild(el('p', { class: 'urgent-more', text: '외 ' + hidden + '줄' }));
     applySideOpen();
   }
 

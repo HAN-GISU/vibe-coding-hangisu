@@ -134,7 +134,7 @@
     var g = currentGame(d);
     app.textContent = '';
     app.appendChild(el('h1', { class: 'page-title', text: '설정' }));
-    app.appendChild(el('p', { class: 'page-desc', text: '게임, 리셋 주기, 단계, 폴더, 묶음, 숙제를 만들고 고칩니다. 바꾼 내용은 이 브라우저에 바로 저장돼요.' }));
+    app.appendChild(el('p', { class: 'page-desc', text: '게임, 리셋 주기, 단계, 폴더, 묶음, 숙제를 만들고 고칩니다. ' + (Store.status().persistent ? '바꾼 내용은 이 브라우저에 바로 저장돼요.' : '이 브라우저에서는 저장되지 않아서, 바꾼 내용은 이 페이지가 열려 있는 동안만 남아요.') }));
     app.appendChild(el('div', { class: 'layout' }, [gamesCard(d, g), g ? editor(d, g) : emptyEditor()]));
     app.appendChild(presetsCard(d));
     app.appendChild(backupCard());
@@ -143,14 +143,15 @@
   }
 
   function gamesCard(d, g) {
+    var corrupted = Store.status().status === 'corrupted';
     var list = d.games.length
       ? el('ul', { class: 'list' }, d.games.map(function (x) {
         return el('li', {}, el('button', { type: 'button', class: 'game-item', 'aria-current': g && x.id === g.id ? 'true' : null, onclick: function () { state.gameId = x.id; render(); } }, [
           el('span', { class: 'row-name', text: x.name })
         ]));
       }))
-      : el('p', { class: 'empty', text: '아직 게임이 없어요.' });
-    return card('게임', '관리할 게임을 고르세요.', list, [btn('+ 게임 추가', addGame, 'primary')]);
+      : el('p', { class: 'empty', text: corrupted ? '저장된 데이터가 손상돼 있어서 게임을 보여 주거나 추가할 수 없어요. 맨 위 안내에서 복구해 주세요.' : '아직 게임이 없어요.' });
+    return card('게임', '관리할 게임을 고르세요.', list, [btn('+ 게임 추가', addGame, 'primary', corrupted)]);
   }
 
   /* ---------- 프리셋 (CLAUDE.md 4장 설정, 7장) ---------- */
