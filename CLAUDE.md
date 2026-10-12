@@ -331,7 +331,7 @@ docs/presets-sources.md   기본 프리셋 조사 원문과 출처 (7장 근거)
 | 단계 | 상태 | 커밋 |
 |---|---|---|
 | 0 골격·Pages | 완료 | 5d7ae4c |
-| 1 reset.js·tests | | |
+| 1 reset.js·tests | 완료 | e49e6b1 |
 | 2 store.js | | |
 | 3 설정 화면 | | |
 | 4 메인 게임 목록 | | |
