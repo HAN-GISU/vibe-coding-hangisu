@@ -166,6 +166,9 @@
 ### 화면 모양 (UI)
 
 - 전체 모양은 **shadcn/ui 공식 데모 대시보드**(https://ui.shadcn.com/blocks 의 `dashboard-01`)를 참고한다. 수업 TIP 11에서 소개된 화면이다.
+- **참고 자료는 `docs/ui-reference/`에 있다. UI 작업 전에 `docs/ui-reference/README.md`를 먼저 읽는다.**
+  - `screenshots/`: 데모 화면과 Table·Dialog·Form·Card·Checkbox·Badge 캡처, 우리 화면 어디에 쓰는지 대응표
+  - `tokens.css`: 색과 크기 값. `css/style.css` 맨 위에 그대로 복사해 쓴다. 색은 여기 있는 변수만 쓰고 새 색을 지어내지 않는다.
 - **shadcn/ui 라이브러리는 설치하지 않는다.** shadcn/ui는 React와 Tailwind 빌드가 필요해서 2-2 규칙(빌드 도구·프레임워크 금지)과 맞지 않는다. 생김새만 일반 HTML·CSS로 따라 만든다.
 - 따라 할 것:
   - 왼쪽 사이드바 + 오른쪽 본문 배치 (4장 메인 화면 구조와 같다)
@@ -194,6 +197,7 @@ js/main.js       메인 화면
 js/settings.js   설정 화면
 js/history.js    기록 화면
 docs/            성찰 기록, 스크린샷
+docs/ui-reference/   UI 참고 자료 (README.md, screenshots/, tokens.css). 앱 코드가 아니다
 ```
 
 ### 구현 순서 (한 단계 = 계획 승인 → 구현 → 검증 → 커밋)
