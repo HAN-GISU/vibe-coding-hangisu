@@ -320,8 +320,8 @@ docs/presets-sources.md   기본 프리셋 조사 원문과 출처 (7장 근거)
 
 ### 캐시 갱신 규칙
 
-- GitHub Pages는 파일을 10분 캐시한다. `index.html`, `settings.html`, `docs/tests.html`, `docs/architecture.html`의 모든 js·css 주소 끝에 `?v=날짜-번호`를 붙이고 **모든 파일에서 같은 값**을 쓴다(`docs/tests.html`이 검사한다).
-- JS·CSS를 바꾸는 커밋마다 값을 올린다: `sed -i -E "s/\?v=[0-9]{8}-[0-9]+/?v=새값/g" index.html settings.html docs/tests.html docs/architecture.html` (날짜 8자리-번호가 붙은 값만 바꾼다. `?v=`만 쓰는 테스트 설명 글은 건드리지 않는다.)
+- GitHub Pages는 파일을 10분 캐시한다. `index.html`, `settings.html`, `history.html`, `docs/tests.html`, `docs/architecture.html`의 모든 js·css 주소 끝에 `?v=날짜-번호`를 붙이고 **모든 파일에서 같은 값**을 쓴다(`docs/tests.html`이 검사한다).
+- JS·CSS를 바꾸는 커밋마다 값을 올린다: `sed -i -E "s/\?v=[0-9]{8}-[0-9]+/?v=새값/g" index.html settings.html history.html docs/tests.html docs/architecture.html` (날짜 8자리-번호가 붙은 값만 바꾼다. `?v=`만 쓰는 테스트 설명 글은 건드리지 않는다.)
 
 ### 구현 순서 (한 단계 = 계획 승인 → 구현 → 검증 → 커밋)
 

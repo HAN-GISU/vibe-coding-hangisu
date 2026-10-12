@@ -393,3 +393,26 @@ table.board { width: 100%; border-collapse: collapse; }
 @media (max-width: 639px) {
   .dn-detail { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
+
+/* ---------- 기록 화면 ---------- */
+#history { display: grid; gap: var(--gap); min-width: 0; }
+.hsec + .hsec { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+.hsec-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.hgroup + .hgroup { margin-top: 12px; }
+.hgroup-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 4px; }
+.htask { border-top: 1px solid var(--border); }
+.htask > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 44px; padding: 6px 0; cursor: pointer; }
+.htask-name { overflow-wrap: anywhere; }
+.htask-sum { margin-left: auto; color: var(--muted-foreground); font-size: 13px; }
+.htask-sum.has-missed { color: var(--destructive); font-weight: 600; }
+.htask-body { padding: 0 0 10px 12px; }
+.hrows { margin: 0 0 8px; padding: 0; list-style: none; }
+.hrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 2px 12px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.hrow:first-child { border-top: 0; }
+.hperiod { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; color: var(--muted-foreground); }
+.hstat { display: inline-flex; align-items: center; gap: 6px; }
+.st-done { color: var(--foreground); }
+.st-neutral { color: var(--muted-foreground); }
+.st-missed { color: var(--destructive); font-weight: 600; }
+.badge-warn { border-color: var(--destructive); color: var(--destructive); }
+.hnote { margin: 4px 0 0; font-size: 13px; }

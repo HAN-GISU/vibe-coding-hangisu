@@ -8,11 +8,11 @@
 
   var WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
-  // 메뉴. ready가 false인 화면은 아직 없어서 링크 대신 "준비 중"으로 보인다 (6단계에서 켠다).
+  // 메뉴. ready가 false인 화면은 아직 없어서 링크 대신 "준비 중"으로 보인다.
   var PAGES = [
     { key: 'index', label: '메인', href: 'index.html', ready: true },
     { key: 'settings', label: '설정', href: 'settings.html', ready: true },
-    { key: 'history', label: '기록', href: 'history.html', ready: false }
+    { key: 'history', label: '기록', href: 'history.html', ready: true }
   ];
 
   /* ---------- 요소 만들기 ---------- */
@@ -211,6 +211,19 @@
       two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds());
   }
 
+  // 날짜 글자는 이 함수 한 곳에서 만든다. "MM/DD(요일) HH:mm" (withWeekday가 false이면 "MM/DD HH:mm").
+  // 그 날짜의 연도가 at(지금)의 연도와 다르면 앞에 "YYYY/"를 붙인다.
+  function formatWhen(d, at, withWeekday) {
+    var year = d.getFullYear() !== at.getFullYear() ? d.getFullYear() + '/' : '';
+    return year + two(d.getMonth() + 1) + '/' + two(d.getDate()) + (withWeekday ? '(' + WEEKDAYS[d.getDay()] + ')' : '') + ' ' + two(d.getHours()) + ':' + two(d.getMinutes());
+  }
+
+  // 기간 한 줄의 글자. 시작·끝이 없는 1회 주기는 "1회 · 기한 없음".
+  function formatPeriod(p, at) {
+    if (!p.start || !p.end) return '1회 · 기한 없음';
+    return formatWhen(p.start, at, true) + ' ~ ' + formatWhen(p.end, at, true);
+  }
+
   var clockEl = null;
   var clockTimer = null;
   function tickClock() {
@@ -310,6 +323,6 @@
     el: el, field: field, nextId: nextId, navLink: navLink,
     modal: modal, confirm: confirmDialog, info: info, sheet: sheet, isDialogOpen: isDialogOpen, whenDialogsClosed: whenDialogsClosed,
     notice: notice, download: download,
-    mountChrome: mountChrome, refreshStorageBanner: refreshStorageBanner, clockText: clockText
+    mountChrome: mountChrome, refreshStorageBanner: refreshStorageBanner, clockText: clockText, formatWhen: formatWhen, formatPeriod: formatPeriod
   };
 })(window);

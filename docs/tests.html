@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>reset.js · store.js 테스트</title>
-  <link rel="stylesheet" href="../css/style.css?v=20261012-3">
+  <link rel="stylesheet" href="../css/style.css?v=20261012-5">
   <style>
     /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
     .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
@@ -50,8 +50,9 @@
   <div id="out"></div>
 </main>
 
-<script src="../js/reset.js?v=20261012-3"></script>
-<script src="../js/store.js?v=20261012-3"></script>
+<script src="../js/reset.js?v=20261012-5"></script>
+<script src="../js/store.js?v=20261012-5"></script>
+<script src="../js/ui.js?v=20261012-5"></script>
 <script>
 (function () {
   'use strict';
@@ -673,7 +674,7 @@
     eq('모든 HTML의 모든 주소가 같은 ?v= 값을 쓴다 (한 줄 sed로 한 번에 올린다)', function () {
       var set = {}; Object.keys(versions).forEach(function (k) { set[versions[k]] = true; }); return Object.keys(set).length;
     }, 1);
-    eq('검사 대상 HTML: index, settings, docs/tests, docs/architecture', function () { return Object.keys(htmlTexts).sort(); }, ['architecture.html', 'index.html', 'settings.html', 'tests.html']);
+    eq('검사 대상 HTML: index, settings, history, docs/tests, docs/architecture', function () { return Object.keys(htmlTexts).sort(); }, ['architecture.html', 'history.html', 'index.html', 'settings.html', 'tests.html']);
   });
 
   /* ---------- store.js ---------- */
@@ -1791,8 +1792,8 @@
       }, [3, 3, true]);
       eq('만든 시각이 기간 끝과 같으면 그 기간은 빠지고(경계), 1분 전이면 들어간다', function () {
         var a = hte(bh(withTask(board(), 'tk1', { createdAt: iso(10, 14, 5, 0) })), 'fc1', 'gr1', 'tk1');
-        var b = hte(bh(withTask(board(), 'tk1', { createdAt: iso(10, 14, 4, 59) })), 'fc1', 'gr1', 'tk1'); return [a.shown, b.shown];
-      }, [2, 3]);
+        var b = hte(bh(withTask(board(), 'tk1', { createdAt: iso(10, 14, 4, 59) })), 'fc1', 'gr1', 'tk1'); return [a.shown, a.total, b.shown, b.total];
+      }, [2, 2, 3, 3]);
       eq('같은 묶음의 숙제마다 만든 시각이 달라도 각자 자기 기간부터 센다', function () {
         var h = bh(withTask(board(), 'tk2', { createdAt: iso(10, 14, 8, 0) })); return [hte(h, 'fc1', 'gr1', 'tk1').total, hte(h, 'fc1', 'gr1', 'tk2').total];
       }, [16, 2]);
@@ -1830,9 +1831,10 @@
         var d = board(); d.games[0].cycles.push({ id: 'cm', name: '1분', type: 'interval', anchor: '2026-10-01T00:00', every: { minutes: 1 } });
         d.groups.push({ id: 'gm', gameId: 'gm1', name: '분', cycleId: 'cm', scope: 'game', required: null, low: false });
         d.tasks.push({ id: 'tm', groupId: 'gm', name: 'tm', low: false, createdAt: '2026-10-01T00:00:00' });
-        var a = hte(bh(d), 'game', 'gm', 'tm'), b = hte(bh(d, NOON, 5000), 'game', 'gm', 'tm');
-        return [a.shown, a.total, a.truncated, a.more, b.shown, b.more];
-      }, [10, 1000, true, true, 1000, false]);
+        d.tasks.push({ id: 'tn', groupId: 'gm', name: 'tn', low: false, createdAt: iso(10, 15, 11, 0) });
+        var a = hte(bh(d), 'game', 'gm', 'tm'), b = hte(bh(d, NOON, 5000), 'game', 'gm', 'tm'), n = hte(bh(d, NOON, 5000), 'game', 'gm', 'tn');
+        return [a.shown, a.total, a.truncated, a.more, b.shown, b.more, n.total, n.truncated, n.more];
+      }, [10, 1000, true, true, 1000, false, 61, false, false]);
     });
 
     suite('기록 기간 (Reset.listHistoryPeriods) — 주기를 바꾼 직후(carry)', function () {
@@ -1893,6 +1895,20 @@
         var main = gp(eg(withRecs(d, [rc('tk8', null, D(10, 15, 7, 0))])), 'gr5').ev.tasks[0].state;
         return [before.shown, before.rows[0].period.start.getTime() === D(10, 15, 8, 0).getTime(), before.rows[0].status, main, after.rows[0].status];
       }, [1, true, 'pending', 'todo', 'done']);
+    });
+
+    suite('기록 화면 글자 (UI.formatWhen, UI.formatPeriod)와 리셋 대기 (Reset.resetDelay)', function () {
+      var U = window.UI;
+      ok('ui.js를 불러왔다', function () { return !!U && typeof U.formatWhen === 'function'; });
+      if (!U) return;
+      eq('같은 해: MM/DD(요일) HH:mm (0 채움)', function () { return U.formatWhen(D(10, 5, 5, 0), NOON, true); }, '10/05(월) 05:00');
+      eq('완료 시각은 요일 없이: 10/07 21:13', function () { return U.formatWhen(D(10, 7, 21, 13), NOON, false); }, '10/07 21:13');
+      eq('다른 해는 앞에 YYYY/ (작년 12/31 23:59, 내년 01/01 00:00)', function () { return [U.formatWhen(new Date(2025, 11, 31, 23, 59), NOON, false), U.formatWhen(new Date(2027, 0, 1, 0, 0), NOON, true)]; }, ['2025/12/31 23:59', '2027/01/01(금) 00:00']);
+      eq('기간 한 줄: 시작 ~ 끝', function () { return U.formatPeriod({ start: D(10, 5, 5, 0), end: D(10, 12, 5, 0) }, NOON); }, '10/05(월) 05:00 ~ 10/12(월) 05:00');
+      eq('1회(시작·끝 없음, 또는 끝이 없음)는 "1회 · 기한 없음"', function () { return [U.formatPeriod({ start: null, end: null }, NOON), U.formatPeriod({ start: D(10, 5, 5, 0), end: null }, NOON)]; }, ['1회 · 기한 없음', '1회 · 기한 없음']);
+      eq('resetDelay: 가장 빠른 리셋 직후(+1ms), 60초 상한, 빈 목록은 60초, 숫자가 아닌 값은 무시', function () {
+        return [R.resetDelay([5000, 90000]), R.resetDelay([120000]), R.resetDelay([]), R.resetDelay(), R.resetDelay([null, 3000]), R.resetDelay([0])];
+      }, [5001, 60000, 60000, 60000, 3001, 1]);
     });
 
     suite('체크 저장 (checkTask, uncheckTask)', function () {
@@ -2145,7 +2161,7 @@
   window.runAll = runAll;
 
   // 형제 HTML(?v= 검사용)을 읽은 뒤 실행한다. file://이면 읽지 않고 바로 실행한다.
-  var HTML_FILES = { 'index.html': '../index.html', 'settings.html': '../settings.html', 'tests.html': 'tests.html', 'architecture.html': 'architecture.html' };
+  var HTML_FILES = { 'index.html': '../index.html', 'settings.html': '../settings.html', 'history.html': '../history.html', 'tests.html': 'tests.html', 'architecture.html': 'architecture.html' };
   if (location.protocol === 'file:' || !window.fetch) {
     runAll();
   } else {

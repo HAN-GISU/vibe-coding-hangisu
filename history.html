@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>기록 · 게임 숙제 체크</title>
+  <link rel="stylesheet" href="css/style.css?v=20261012-5">
+</head>
+<body>
+  <div id="chrome"></div>
+  <main class="page" id="app" tabindex="-1">
+    <h1 class="page-title">기록</h1>
+    <p class="page-desc">숙제마다 지난 기간에 했는지 안 했는지 볼 수 있어요.</p>
+    <div id="history"><noscript><p>이 화면은 JavaScript가 켜져 있어야 동작해요.</p></noscript></div>
+  </main>
+
+  <script src="js/reset.js?v=20261012-5"></script>
+  <script src="js/store.js?v=20261012-5"></script>
+  <script src="js/ui.js?v=20261012-5"></script>
+  <script>UI.mountChrome({ active: 'history' });</script>
+  <script src="js/history.js?v=20261012-5"></script>
+</body>
+</html>

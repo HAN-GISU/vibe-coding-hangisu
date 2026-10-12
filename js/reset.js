@@ -844,6 +844,13 @@
 
   // 화면에 보이는 남은 시간 목록(ms, 1회는 null)에서, 다음에 다시 그릴 때까지 기다릴 시간(ms).
   // 가장 빨리 바뀌는 글자에 맞추되, 길어도 60초다 (3장 "화면 갱신").
+  // 리셋 순간에만 바뀌는 화면(기록)을 위한 대기 시간: 가장 빠른 리셋 직후(+1ms)까지, 길어도 60초. 목록이 비면 60초.
+  function resetDelay(list) {
+    var delay = MINUTE;
+    (list || []).forEach(function (ms) { if (typeof ms === 'number' && ms + 1 < delay) delay = ms + 1; });
+    return Math.max(1, delay);
+  }
+
   function redrawDelay(list) {
     var delay = MINUTE;
     list.forEach(function (ms) {
@@ -886,6 +893,7 @@
     buildUrgent: buildUrgent,
     msUntilTextChange: msUntilTextChange,
     msUntilNextSecond: msUntilNextSecond,
-    redrawDelay: redrawDelay
+    redrawDelay: redrawDelay,
+    resetDelay: resetDelay
   };
 })(typeof window !== 'undefined' ? window : this);
