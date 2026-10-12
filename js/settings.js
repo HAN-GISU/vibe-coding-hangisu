@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var UI = window.UI, Store = window.Store, Reset = window.Reset, O = Store.ops, el = UI.el;
+  var UI = window.UI, Store = window.Store, Reset = window.Reset, Presets = window.Presets, O = Store.ops, el = UI.el;
   var app = document.getElementById('app');
   var state = { gameId: null };
   var DAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -136,6 +136,7 @@
     app.appendChild(el('h1', { class: 'page-title', text: '설정' }));
     app.appendChild(el('p', { class: 'page-desc', text: '게임, 리셋 주기, 단계, 폴더, 묶음, 숙제를 만들고 고칩니다. 바꾼 내용은 이 브라우저에 바로 저장돼요.' }));
     app.appendChild(el('div', { class: 'layout' }, [gamesCard(d, g), g ? editor(d, g) : emptyEditor()]));
+    app.appendChild(presetsCard(d));
     app.appendChild(backupCard());
     UI.updateLastExportNote(); // 이미 내보낸 파일이 있으면 표시 (다시 그려도 유지)
     UI.refreshStorageBanner();
@@ -150,6 +151,145 @@
       }))
       : el('p', { class: 'empty', text: '아직 게임이 없어요.' });
     return card('게임', '관리할 게임을 고르세요.', list, [btn('+ 게임 추가', addGame, 'primary')]);
+  }
+
+  /* ---------- 프리셋 (CLAUDE.md 4장 설정, 7장) ---------- */
+
+  function presetSummaryText(p) {
+    var s = Presets.summary(p);
+    return '리셋 주기 ' + s.cycles + ' · 묶음 ' + s.groups + ' · 숙제 ' + s.tasks + (s.folders ? ' · 폴더 ' + s.folders : '');
+  }
+
+  function smallBtn(text, onclick, kind, disabled, label) {
+    return el('button', { type: 'button', class: 'btn btn-sm' + (kind ? ' btn-' + kind : ''), text: text, 'aria-label': label || null, onclick: onclick, disabled: disabled === true });
+  }
+
+  function presetsCard(d) {
+    var corrupted = Store.status().status === 'corrupted';
+    function row(p, mine) {
+      var info = el('div', { class: 'row-main' }, [
+        el('span', { class: 'row-name', text: p.name }), badge(presetSummaryText(p)),
+        mine ? badge('저장 ' + UI.formatWhen(Reset.parseTime(p.savedAt) || Reset.now(), Reset.now(), false)) : null
+      ]);
+      var actions = [smallBtn('불러오기', function () { loadPreset(p); }, null, corrupted, p.name + ' 불러오기')];
+      if (mine) {
+        actions.push(smallBtn('이름 바꾸기', function () { renamePreset(p); }, null, corrupted, p.name + ' 이름 바꾸기'));
+        actions.push(smallBtn('삭제', function () { deletePreset(p); }, 'danger', corrupted, p.name + ' 삭제'));
+      }
+      return el('li', { class: 'row preset-row' }, [info, el('div', { class: 'row-actions' }, actions)]);
+    }
+    var body = [
+      el('p', { class: 'muted', text: '프리셋을 고르면 그 게임의 리셋 주기, 묶음, 숙제가 한 번에 새 게임으로 추가돼요. 지금 있는 게임과 완료 기록은 바뀌지 않아요.' }),
+      corrupted ? el('p', { class: 'muted', text: '저장된 데이터가 손상돼 있어서 지금은 불러올 수 없어요. 맨 위 안내를 확인해 주세요.' }) : null,
+      el('h3', { class: 'preset-heading', text: '기본 프리셋' }),
+      el('ul', { class: 'list' }, Presets.all().map(function (p) { return row(p, false); })),
+      el('h3', { class: 'preset-heading', text: '내 프리셋' }),
+      d.presets.length
+        ? el('ul', { class: 'list' }, d.presets.map(function (p) { return row(p, true); }))
+        : el('p', { class: 'empty', text: '아직 없어요. 게임의 [게임 작업] → [프리셋으로 저장]으로 만들 수 있어요.' })
+    ];
+    return el('div', { id: 'presets', class: 'presets-wrap' }, [card('프리셋', null, body)]);
+  }
+
+  // 프리셋 하나를 새 게임으로 불러온다. 프리셋에 폴더가 있으면 그대로 복사하고, 없으면 폴더 구조를 들여쓰기로 받는다.
+  function loadPreset(p) {
+    var hasFolders = p.game.folders.length > 0;
+    var area = null;
+    var parts = [el('p', { class: 'fixed-line', text: '"' + p.name + '" 게임이 새로 추가돼요. ' + presetSummaryText(p) })];
+    if (hasFolders) {
+      parts.push(el('p', { class: 'muted', text: '저장한 폴더 구조를 그대로 가져와요. 이름은 불러온 뒤 설정에서 바꿀 수 있어요.' }));
+      parts.push(el('pre', { class: 'preset-tree', text: Presets.folderText(p) }));
+    } else if (p.game.levels.length > 0) {
+      area = el('textarea', { class: 'textarea', id: UI.nextId('f'), rows: 6, placeholder: '본계정\n  캐릭터1\n  캐릭터2\n부계정\n  캐릭터3', spellcheck: 'false' });
+      parts.push(UI.field('폴더 구조 (' + p.game.levels.join(' › ') + ')', area, '비워 두면 폴더 없이 추가돼요. 아래 단계는 들여써서 적어요 (처음 들여쓴 줄의 공백 수가 한 단계).'));
+    } else {
+      parts.push(el('p', { class: 'muted', text: '이 프리셋은 단계와 폴더가 없어요.' }));
+    }
+    var needSameName = false;
+    function add(sameName) {
+      var text = area ? area.value : '';
+      return Store.apply(function (d) { return O.addGameFromPreset(d, p, { folderText: text, sameName: sameName, at: Reset.now() }); });
+    }
+    afterModal(UI.modal({
+      title: '"' + p.name + '" 불러오기', body: el('div', {}, parts), submitLabel: '불러오기',
+      onSubmit: function () {
+        var r = add('ask');
+        if (r.needsConfirm === 'sameName') { needSameName = true; return { ok: true }; } // 이 창을 닫고 확인 창을 연다
+        if (!r.ok) return r;
+        state.gameId = r.id;
+        render();
+        return { ok: true };
+      }
+    }).then(function (done) {
+      if (!done || !needSameName) return;
+      afterModal(UI.confirm({
+        title: '같은 이름의 게임이 이미 있어요',
+        message: '"' + p.name + '" 게임이 이미 있어요. 덮어쓰지 않고 따로 하나 더 추가할까요?',
+        confirmLabel: '따로 하나 더 추가',
+        onConfirm: function () {
+          var r = add('add');
+          if (!r.ok) return r;
+          state.gameId = r.id;
+          render();
+          return { ok: true };
+        }
+      }));
+    }));
+  }
+
+  // 게임을 내 프리셋으로 저장한다. 같은 이름이 있으면 "덮어쓰기 / 다른 이름으로 저장 / 취소"를 묻는다.
+  function saveAsPreset(g, initialName) {
+    var id = UI.nextId('f');
+    var input = el('input', { class: 'input', type: 'text', id: id, value: initialName || g.name, maxlength: 100, autocomplete: 'off' });
+    var conflict = null;
+    afterModal(UI.modal({
+      title: '프리셋으로 저장', description: '이 게임의 리셋 주기, 단계, 폴더(끈 항목 포함), 묶음, 숙제를 저장해요. 완료 기록은 저장하지 않아요.',
+      body: UI.field('프리셋 이름', input), submitLabel: '저장',
+      onSubmit: function () {
+        var name = input.value;
+        var r = Store.apply(function (d) { return O.savePreset(d, g.id, name, 'ask', Reset.now()); });
+        if (r.needsConfirm === 'sameName') { conflict = name; return { ok: true }; }
+        if (!r.ok) return r;
+        render();
+        return { ok: true };
+      }
+    }).then(function (done) {
+      if (!done || conflict === null) return;
+      var name = conflict, other = false;
+      afterModal(UI.modal({
+        title: '같은 이름의 프리셋이 있어요', hideSubmit: true, cancelLabel: '취소',
+        body: function (ctx) {
+          return el('div', {}, [
+            el('p', { text: '"' + name + '" 프리셋이 이미 있어요. 어떻게 할까요?' }),
+            el('div', { class: 'sheet-actions' }, [
+              el('button', { type: 'button', class: 'btn btn-danger', text: '덮어쓰기', onclick: function () {
+                var r = Store.apply(function (d) { return O.savePreset(d, g.id, name, 'overwrite', Reset.now()); });
+                UI.notice(r.ok ? '' : r.error);
+                if (r.ok) render();
+                ctx.close(true);
+              } }),
+              el('button', { type: 'button', class: 'btn', text: '다른 이름으로 저장', onclick: function () { other = true; ctx.close(true); } })
+            ])
+          ]);
+        }
+      }).then(function () { if (other) saveAsPreset(g, name); }));
+    }));
+  }
+
+  function renamePreset(p) {
+    nameDialog({
+      title: '프리셋 이름 바꾸기', label: '프리셋 이름', initial: p.name,
+      onSubmit: function (name) { return commit(function (d) { return O.renamePreset(d, p.id, name); }); }
+    });
+  }
+
+  function deletePreset(p) {
+    afterModal(UI.confirm({
+      title: '프리셋을 지울까요?', message: '"' + p.name + '" 프리셋을 지워요.',
+      lines: ['이 프리셋으로 이미 만든 게임은 그대로예요.'],
+      confirmLabel: '삭제', danger: true,
+      onConfirm: function () { return commit(function (d) { return O.deletePreset(d, p.id); }); }
+    }));
   }
 
   // 데이터 백업: 전체 데이터를 JSON 파일 하나로 내보내거나, 내보낸 파일로 바꾼다 (CLAUDE.md 3장 "저장")
@@ -197,6 +337,7 @@
       title: g.name,
       actions: [
         { label: '이름 바꾸기', onClick: function () { renameGame(g); } },
+        { label: '프리셋으로 저장', onClick: function () { saveAsPreset(g, g.name); } },
         { label: '위로', onClick: function () { quick(function (d) { return O.moveGame(d, g.id, -1); }); } },
         { label: '아래로', onClick: function () { quick(function (d) { return O.moveGame(d, g.id, 1); }); } },
         { label: '삭제', danger: true, onClick: function () { deleteGame(g); } }
@@ -636,6 +777,8 @@
   UI.mountChrome({ active: 'settings' });
   UI.onImported(render); // 저장소가 없는 모드에서는 가져온 뒤 새로 고치지 않고 다시 그린다
   render();
+  // 메인 빈 상태의 [프리셋 불러오기]는 settings.html#presets로 온다. 화면을 JS로 그리므로 처음 그린 뒤 직접 스크롤한다.
+  if (location.hash === '#presets') { var presetsEl = document.getElementById('presets'); if (presetsEl) presetsEl.scrollIntoView(); }
 
   // 탭이 다시 보이면 다시 그린다 (다른 탭에서 바뀐 내용 반영). 열려 있는 창이 있으면 닫힌 뒤에 그린다.
   document.addEventListener('visibilitychange', function () {

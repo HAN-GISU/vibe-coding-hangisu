@@ -296,6 +296,7 @@ dialog.dlg::backdrop { background: var(--overlay); }
   .dlg-foot { flex-direction: column-reverse; padding: 0 16px 16px; }
   .dlg-foot .btn { width: 100%; }
 }
+a.btn { text-decoration: none; } /* 링크에 버튼 모양을 입힌 것 (밑줄 없음) */
 @media (pointer: coarse) {
   .btn, .input, .select { min-height: 44px; }
   .btn-sm { min-height: 40px; }
@@ -419,3 +420,13 @@ table.board { width: 100%; border-collapse: collapse; }
 
 /* 데이터 백업 카드 (설정 화면 맨 아래) */
 .backup-wrap { margin-top: var(--gap); }
+
+/* 프리셋 카드 (설정 화면, 데이터 백업 카드 위) */
+.presets-wrap { margin-top: var(--gap); }
+.preset-heading { margin: 16px 0 4px; font-size: 14px; font-weight: 600; }
+.preset-row { flex-wrap: wrap; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.preset-tree { margin: 8px 0 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); font-family: inherit; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .preset-row .row-main { flex: 1 1 100%; }
+}

@@ -78,11 +78,15 @@
 
   /* ---------- 구조 만들기 ---------- */
 
-  function emptyCard(title, text, linkText) {
+  // withPresets: 게임이 없을 때 설정 화면의 프리셋 영역(settings.html#presets)으로 가는 버튼도 보여 준다 (이 파일은 프리셋 데이터를 모른다)
+  function emptyCard(title, text, linkText, withPresets) {
     return el('section', { class: 'card' }, [
       el('div', { class: 'card-head' }, [el('h2', { class: 'card-title', text: title })]),
       el('div', { class: 'card-body' }, [el('p', { class: 'empty', text: text })]),
-      el('div', { class: 'card-foot' }, [linkText ? UI.navLink(linkText, 'settings.html', 'btn btn-primary') : null])
+      el('div', { class: 'card-foot' }, [
+        linkText ? UI.navLink(linkText, 'settings.html', 'btn btn-primary') : null,
+        withPresets ? UI.navLink('프리셋 불러오기', 'settings.html#presets', 'btn') : null
+      ])
     ]);
   }
 
@@ -95,7 +99,7 @@
       var corrupted = Store.status().status === 'corrupted';
       host.appendChild(corrupted
         ? emptyCard('데이터를 읽지 못했어요', '저장된 데이터가 손상돼 있어서 지금은 보여 줄 수 없어요. 맨 위 안내를 확인해 주세요.', null)
-        : emptyCard('아직 게임이 없어요', '설정에서 게임과 숙제를 만들면 여기에 모아서 보여 줘요.', '게임 추가하러 가기'));
+        : emptyCard('아직 게임이 없어요', '설정에서 게임과 숙제를 만들면 여기에 모아서 보여 줘요.', '게임 추가하러 가기', true));
       return;
     }
     model.games.forEach(function (gm) { host.appendChild(gameCard(gm)); });
