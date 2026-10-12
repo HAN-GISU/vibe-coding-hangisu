@@ -54,7 +54,20 @@
   /* ---------- 대화상자 ---------- */
 
   var openCount = 0;
+  var closedCallbacks = [];
   function isDialogOpen() { return openCount > 0; }
+
+  // 열린 대화상자가 모두 닫힌 뒤에 fn을 한 번 부른다 (이미 없으면 바로). 같은 fn은 한 번만 기다린다.
+  function whenDialogsClosed(fn) {
+    if (openCount === 0) { fn(); return; }
+    if (closedCallbacks.indexOf(fn) < 0) closedCallbacks.push(fn);
+  }
+  function flushClosed() {
+    if (openCount > 0) return;
+    var cbs = closedCallbacks;
+    closedCallbacks = [];
+    cbs.forEach(function (cb) { cb(); });
+  }
 
   // modal({ title, description, body, submitLabel, cancelLabel, danger, hideSubmit, onSubmit })
   //   onSubmit()가 { ok:false, error }를 돌려주면(Promise도 된다) 닫지 않고 그 오류를 창 안에 보여 준다.
@@ -81,6 +94,7 @@
         if (dlg.parentNode) dlg.parentNode.removeChild(dlg);
         if (opener && document.contains(opener) && typeof opener.focus === 'function') opener.focus();
         resolve(result);
+        setTimeout(flushClosed, 0); // 곧바로 다음 창이 열리면 그 창이 닫힐 때까지 기다린다
       }
       function close(res) {
         if (res !== undefined) result = res;
@@ -286,7 +300,7 @@
 
   global.UI = {
     el: el, field: field, nextId: nextId,
-    modal: modal, confirm: confirmDialog, info: info, sheet: sheet, isDialogOpen: isDialogOpen,
+    modal: modal, confirm: confirmDialog, info: info, sheet: sheet, isDialogOpen: isDialogOpen, whenDialogsClosed: whenDialogsClosed,
     notice: notice, download: download,
     mountChrome: mountChrome, refreshStorageBanner: refreshStorageBanner, clockText: clockText
   };

@@ -1423,12 +1423,14 @@
         var g = m.d.games[0]; var b1 = g.folders.filter(function (f) { return f.id === 'b1'; })[0]; var c1 = g.folders.filter(function (f) { return f.id === 'c1'; })[0];
         return [m.r.ok, b1.parentId, c1.parentId, m.d.records.length, g.folders[g.folders.length - 1].id, m.valid.ok];
       }, [true, 'a2', 'b1', 1, 'b1', true]);
-      eq('옮기기: 새 상위 폴더가 끈 항목이 아래 폴더로 이어지고 이전 상위가 끈 것은 빠진다', function () {
-        var base = tri(); base.games[0].folders[0].off = [];
-        var before = R.isOff(base.games[0].folders, 'c1', 't1');
+      eq('옮기기: 새 상위 폴더가 끈 항목은 아래 폴더로 이어지고, 이전 상위 폴더가 끈 항목은 풀린다', function () {
+        var base = tri();
+        base.tasks.push({ id: 't2', groupId: 'gr', name: 't2', low: false, createdAt: '2026-10-01T00:00:00' });
+        base.games[0].folders[0].off = ['t2'];   // 이전 상위(a1)는 t2를 끈다. 새 상위(a2)는 t1을 끈다 (tri 기본).
+        var before = [R.isOff(base.games[0].folders, 'c1', 't2'), R.isOff(base.games[0].folders, 'c1', 't1')];
         var m = mut(function (d) { return O.moveFolderTo(d, 'b1', 'a2'); }, base);
-        return [before, R.isOff(m.d.games[0].folders, 'c1', 't1')];
-      }, [false, true]);
+        return [before, [R.isOff(m.d.games[0].folders, 'c1', 't2'), R.isOff(m.d.games[0].folders, 'c1', 't1')], m.valid.ok];
+      }, [[true, false], [false, true], true]);
       eq('옮기기 거부: 맨 위 단계 폴더', function () { var d = tri(); var r = O.moveFolderTo(d, 'a1', 'a2'); return [r.ok, r.error.indexOf('맨 위 단계') >= 0]; }, [false, true]);
       eq('옮기기 거부: 바로 위 단계가 아닌 폴더(같은 단계, 한 단계 건너뜀, 자기 하위)', function () {
         var d = tri(); d.games[0].folders.push({ id: 'b2', parentId: 'a1', level: 2, name: 'b2', off: [] });
@@ -1476,6 +1478,72 @@
       eq('끄기: 끌 수 없는 항목이 하나라도 있으면 전부 적용하지 않는다 (게임 공통 묶음, 없는 id)', function () {
         var d = sample(); return [same2(d, function (x) { return O.setOff(x, 'fc1', { gr1: true, gr3: true }); }), same2(d, function (x) { return O.setOff(x, 'fc1', { nope: true }); }), same2(d, function (x) { return O.setOff(x, 'nope', { gr1: true }); })];
       }, [[false, true], [false, true], [false, true]]);
+    });
+
+    suite('ops: "constructor" 같은 id (상속 속성에 걸리지 않는다)', function () {
+      // 원래 tk3 → "constructor", 원래 fc2 → "toString"
+      function ctor() {
+        var d = sample();
+        d.tasks[2].id = 'constructor';
+        d.games[0].folders[2].id = 'toString';
+        d.records = [{ taskId: 'tk1', folderId: 'fc1', doneAt: '2026-10-14T10:00:00' }, { taskId: 'constructor', folderId: 'toString', doneAt: '2026-10-14T10:00:00' }];
+        d.groupRecords = [{ groupId: 'gr2', folderId: 'toString', doneAt: '2026-10-14T11:00:00' }];
+        d.games[0].folders[0].off = ['tk4', 'constructor'];
+        return d;
+      }
+      ok('id가 "constructor", "toString"인 숙제·폴더가 있는 데이터도 유효하다', function () { return ST.validateData(ctor()).ok; });
+      eq('상관없는 묶음(gr1)을 지워도 id가 "constructor"인 숙제의 기록과 끈 항목은 그대로다', function () {
+        var m = mut(function (d) { return O.deleteGroup(d, 'gr1'); }, ctor());
+        return [m.d.records.map(function (r) { return r.taskId; }), m.d.groupRecords.length, m.d.games[0].folders[0].off, m.valid.ok];
+      }, [['constructor'], 1, ['tk4', 'constructor'], true]);
+      eq('상관없는 숙제(tk1)를 지워도 "constructor"의 기록과 끈 항목은 그대로다', function () {
+        var m = mut(function (d) { return O.deleteTask(d, 'tk1'); }, ctor());
+        return [m.d.records.map(function (r) { return r.taskId; }), m.d.games[0].folders[0].off];
+      }, [['constructor'], ['tk4', 'constructor']]);
+      eq('상관없는 게임을 지워도 다른 게임의 "constructor" 기록은 그대로다', function () {
+        var base = ctor();
+        base.games.push({ id: 'gm2', name: '작혼', cycles: [{ id: 'c2', name: '일일', type: 'daily', time: '06:00' }], levels: [], folders: [] });
+        base.groups.push({ id: 'gq', gameId: 'gm2', name: '일일', cycleId: 'c2', scope: 'game', required: null, low: false });
+        base.tasks.push({ id: 'tq', groupId: 'gq', name: '임무', low: false, createdAt: '2026-10-01T00:00:00' });
+        var m = mut(function (d) { return O.deleteGame(d, 'gm2'); }, base);
+        return [m.d.records.map(function (r) { return r.taskId; }), m.valid.ok];
+      }, [['tk1', 'constructor'], true]);
+      eq('상관없는 폴더(fc1)를 지워도 폴더 id가 "toString"인 폴더의 기록과 묶음 기록은 그대로다', function () {
+        var m = mut(function (d) { return O.deleteFolder(d, 'fc1'); }, ctor());
+        return [m.d.records.map(function (r) { return r.taskId; }), m.d.groupRecords.length, m.valid.ok];
+      }, [['constructor'], 1, true]);
+      eq('기록이 있는지(groupHasRecords): 기록이 없는 gr3는 false, "constructor" 숙제가 있는 gr2는 true', function () { var d = ctor(); return [O.groupHasRecords(d, 'gr3'), O.groupHasRecords(d, 'gr2')]; }, [false, true]);
+      eq('영향 조회가 상관없는 id의 기록을 세지 않는다 (묶음 gr1: 기록 1개, 폴더 fc1: 기록 1개와 묶음 기록 0개)', function () { var d = ctor(); return [O.impactGroup(d, 'gr1'), O.impactFolder(d, 'fc1')]; }, [{ tasks: 2, records: 1, groupRecords: 0 }, { folders: 1, records: 1, groupRecords: 0 }]);
+      eq('끄기: 폴더 "toString"은 위 폴더가 끈 "constructor"를 출처와 함께 이어받고, 자기 것은 own으로 구분된다', function () {
+        var d = ctor(); var rows = O.offList(d, 'toString').filter(function (r) { return r.id === 'constructor' || r.id === 'tk4'; });
+        return [rows.map(function (r) { return r.id + ':' + r.own + ':' + r.inheritedFrom; }), R.isOff(d.games[0].folders, 'toString', 'constructor')];
+      }, [['constructor:false:본계정', 'tk4:false:본계정'], true]);
+      eq('끄기 바꾸기: "constructor"를 켜고 끄는 것은 그 항목에만 적용되고 다른 끈 항목(tk4)은 그대로다', function () {
+        var m = mut(function (d) { return O.setOff(d, 'fc1', { constructor: true }); }, ctor());
+        var back = mut(function (d) { return O.setOff(d, 'fa1', { constructor: false }); }, ctor());
+        return [m.d.games[0].folders[1].off, back.d.games[0].folders[0].off];
+      }, [['constructor'], ['tk4']]);
+    });
+
+    suite('ops: 지울 수 있는지 읽기 전용 검사 (canDeleteCycle, canDeleteLevel)', function () {
+      eq('주기: 쓰는 묶음이 있으면 deleteCycle과 같은 안내를 주고 데이터를 바꾸지 않는다', function () {
+        var d = sample(); var before = JSON.stringify(d); var can = O.canDeleteCycle(d, 'gm1', 'cd'); var del = O.deleteCycle(clone(d), 'gm1', 'cd');
+        return [can.ok, can.error === del.error, JSON.stringify(d) === before];
+      }, [false, true, true]);
+      eq('주기: 안 쓰면 지울 수 있고 검사만으로는 지워지지 않는다', function () {
+        var d = sample(); d.games[0].cycles.push({ id: 'cz', name: '안 씀', type: 'once' });
+        return [O.canDeleteCycle(d, 'gm1', 'cz').ok, d.games[0].cycles.length];
+      }, [true, 3]);
+      eq('주기: 없는 주기·게임은 지울 수 없다', function () { var d = sample(); return [O.canDeleteCycle(d, 'gm1', 'nope').ok, O.canDeleteCycle(d, 'nope', 'cd').ok]; }, [false, false]);
+      eq('단계: 폴더가 있는 단계와 범위로 쓰는 묶음이 있는 단계는 deleteLevel과 같은 안내를 주고 데이터를 바꾸지 않는다', function () {
+        var withFolders = sample(); var onlyGroups = sample(); onlyGroups.games[0].folders = [onlyGroups.games[0].folders[0]]; onlyGroups.records = []; onlyGroups.groupRecords = [];
+        var out = [withFolders, onlyGroups].map(function (d) { var before = JSON.stringify(d); var can = O.canDeleteLevel(d, 'gm1', 2); var del = O.deleteLevel(clone(d), 'gm1', 2); return [can.ok, can.error === del.error, JSON.stringify(d) === before]; });
+        return out;
+      }, [[false, true, true], [false, true, true]]);
+      eq('단계: 지울 수 있는 단계(비어 있는 맨 아래)는 ok이고 범위 밖 번호는 거부한다', function () {
+        var d = tri(); d.games[0].folders = []; d.records = []; d.groups[0].scope = 'game';
+        return [O.canDeleteLevel(d, 'g', 3).ok, d.games[0].levels.length, O.canDeleteLevel(d, 'g', 4).ok, O.canDeleteLevel(d, 'g', 0).ok];
+      }, [true, 3, false, false]);
     });
 
     suite('ops: 묶음', function () {

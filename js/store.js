@@ -458,7 +458,7 @@
 
     function groupsOf(d, gameId) { return d.groups.filter(function (g) { return g.gameId === gameId; }); }
     function tasksOfGroups(d, groupIds) {
-      var set = {}; groupIds.forEach(function (id) { set[id] = true; });
+      var set = Object.create(null); groupIds.forEach(function (id) { set[id] = true; });
       return d.tasks.filter(function (t) { return set[t.groupId]; });
     }
 
@@ -476,7 +476,7 @@
     }
 
     function removeOffEntries(d, gameId, ids) {
-      var set = {}; ids.forEach(function (id) { set[id] = true; });
+      var set = Object.create(null); ids.forEach(function (id) { set[id] = true; });
       var g = findGame(d, gameId);
       if (!g) return;
       g.folders.forEach(function (f) { f.off = f.off.filter(function (x) { return !set[x]; }); });
@@ -492,7 +492,8 @@
       });
       return { records: r, groupRecords: gr };
     }
-    function toSet(list) { var s = {}; list.forEach(function (x) { s[x] = true; }); return s; }
+    // id 집합. "constructor" 같은 id가 상속 속성에 걸리지 않게 프로토타입이 없는 객체를 쓴다.
+    function toSet(list) { var s = Object.create(null); list.forEach(function (x) { s[x] = true; }); return s; }
 
     // 같은 무리(sameFn) 안에서 id를 위(-1)·아래(+1)로 한 칸 옮긴다. 끝이면 noop.
     function moveWithin(list, id, delta, sameFn) {
@@ -533,7 +534,7 @@
     function deleteGame(d, gameId) {
       var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
       var groupIds = toSet(groupsOf(d, gameId).map(function (x) { return x.id; }));
-      var taskIds = {};
+      var taskIds = Object.create(null);
       d.tasks.forEach(function (t) { if (groupIds[t.groupId]) taskIds[t.id] = true; });
       d.records = d.records.filter(function (r) { return !taskIds[r.taskId]; });
       d.groupRecords = d.groupRecords.filter(function (r) { return !groupIds[r.groupId]; });
@@ -596,16 +597,21 @@
       return { ok: true, changed: true };
     }
 
-    function deleteCycle(d, gameId, cycleId) {
+    // 주기를 지울 수 있는지 (데이터를 바꾸지 않는다). 쓰는 묶음이 있으면 { ok:false, error }.
+    function canDeleteCycle(d, gameId, cycleId) {
       var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
       var used = groupsOf(d, gameId).filter(function (x) { return x.cycleId === cycleId; });
       if (used.length) {
         var names = used.slice(0, 3).map(function (x) { return '"' + x.name + '"'; }).join(', ');
         return fail(names + (used.length > 3 ? ' 외 ' + (used.length - 3) + '개' : '') + ' 묶음이 이 주기를 쓰고 있어요. 그 묶음을 지운 뒤에 지울 수 있어요.');
       }
-      var before = g.cycles.length;
+      if (!g.cycles.some(function (c) { return c.id === cycleId; })) return fail('리셋 주기를 찾을 수 없어요.');
+      return { ok: true };
+    }
+    function deleteCycle(d, gameId, cycleId) {
+      var can = canDeleteCycle(d, gameId, cycleId); if (!can.ok) return can;
+      var g = findGame(d, gameId);
       g.cycles = g.cycles.filter(function (c) { return c.id !== cycleId; });
-      if (g.cycles.length === before) return fail('리셋 주기를 찾을 수 없어요.');
       return { ok: true };
     }
 
@@ -653,13 +659,19 @@
         groups: groupsOf(d, gameId).filter(function (x) { return x.scope === level; })
       };
     }
-    function deleteLevel(d, gameId, level) {
+    // 단계를 지울 수 있는지 (데이터를 바꾸지 않는다). 폴더나 그 단계를 범위로 쓰는 묶음이 있으면 { ok:false, error }.
+    function canDeleteLevel(d, gameId, level) {
       var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
       if (!(level >= 1 && level <= g.levels.length)) return fail('단계를 찾을 수 없어요.');
       var imp = impactLevel(d, gameId, level);
       var name = g.levels[level - 1];
       if (imp.folders > 0) return fail('"' + name + '" 단계에 폴더가 ' + imp.folders + '개 있어서 지울 수 없어요. 폴더를 먼저 지워 주세요.');
       if (imp.groups.length > 0) return fail('"' + name + '" 단계를 범위로 쓰는 묶음이 ' + imp.groups.length + '개 있어서 지울 수 없어요 (' + imp.groups.slice(0, 3).map(function (x) { return '"' + x.name + '"'; }).join(', ') + '). 그 묶음을 먼저 지워 주세요.');
+      return { ok: true };
+    }
+    function deleteLevel(d, gameId, level) {
+      var can = canDeleteLevel(d, gameId, level); if (!can.ok) return can;
+      var g = findGame(d, gameId);
       g.levels.splice(level - 1, 1);
       g.folders.forEach(function (f) { if (f.level > level) f.level -= 1; });
       groupsOf(d, gameId).forEach(function (x) { if (typeof x.scope === 'number' && x.scope > level) x.scope -= 1; });
@@ -745,7 +757,7 @@
       var tree = subtree(g, folderId);
       if (g.folders.length + tree.length > LIMIT.folders) return fail('폴더는 한 게임에 ' + LIMIT.folders + '개까지예요.');
       var used = allIds(d);
-      var map = {};
+      var map = Object.create(null);
       tree.forEach(function (f) { map[f.id] = makeId('fo', used); });
       var rootName = loc.folder.name.length > LIMIT.name - 3 ? loc.folder.name.slice(0, LIMIT.name - 3) : loc.folder.name;
       var copies = tree.map(function (f) {
@@ -823,10 +835,10 @@
     function offList(d, folderId) {
       var loc = findFolder(d, folderId);
       if (!loc) return [];
-      var byId = {};
+      var byId = Object.create(null);
       loc.game.folders.forEach(function (f) { byId[f.id] = f; });
       function inherited(itemId) {
-        var seen = {};
+        var seen = Object.create(null);
         var id = loc.folder.parentId;
         while (id != null && byId[id] && !seen[id]) {
           seen[id] = true;
@@ -851,14 +863,15 @@
       var allowed = toSet(offList(d, folderId).map(function (r) { return r.id; }));
       var ids = Object.keys(changes);
       for (var i = 0; i < ids.length; i++) if (!allowed[ids[i]]) return fail('이 폴더에서 끌 수 없는 항목이에요.');
-      var off = loc.folder.off.filter(function (x) { return changes[x] !== false; });
+      var has = Object.prototype.hasOwnProperty;
+      var off = loc.folder.off.filter(function (x) { return !(has.call(changes, x) && changes[x] === false); });
       ids.forEach(function (id) { if (changes[id] === true && off.indexOf(id) < 0) off.push(id); });
       loc.folder.off = off;
       return { ok: true };
     }
 
     /* ----- 묶음 ----- */
-    function checkGroupFields(d, g, f) {
+    function checkGroupFields(g, f) {
       var n = cleanName(f.name); if (n.error) return { error: n.error };
       if (!g.cycles.some(function (c) { return c.id === f.cycleId; })) {
         return { error: g.cycles.length ? '리셋 주기를 골라 주세요.' : '먼저 리셋 주기를 추가해 주세요.' };
@@ -875,7 +888,7 @@
 
     function addGroup(d, gameId, fields) {
       var g = findGame(d, gameId); if (!g) return fail('게임을 찾을 수 없어요.');
-      var c = checkGroupFields(d, g, fields); if (c.error) return fail(c.error);
+      var c = checkGroupFields(g, fields); if (c.error) return fail(c.error);
       var id = makeId('gr', allIds(d));
       d.groups.push({ id: id, gameId: gameId, name: c.value.name, cycleId: c.value.cycleId, scope: c.value.scope, required: c.value.required, low: c.value.low });
       return { ok: true, id: id };
@@ -883,7 +896,7 @@
 
     // 이 묶음에 완료 기록이나 묶음 완료 기록이 하나라도 있는지
     function groupHasRecords(d, groupId) {
-      var ids = {};
+      var ids = Object.create(null);
       d.tasks.forEach(function (t) { if (t.groupId === groupId) ids[t.id] = true; });
       return d.records.some(function (r) { return ids[r.taskId]; }) || d.groupRecords.some(function (r) { return r.groupId === groupId; });
     }
@@ -892,7 +905,7 @@
     function updateGroup(d, groupId, fields) {
       var grp = findGroup(d, groupId); if (!grp) return fail('묶음을 찾을 수 없어요.');
       var g = findGame(d, grp.gameId);
-      var c = checkGroupFields(d, g, fields); if (c.error) return fail(c.error);
+      var c = checkGroupFields(g, fields); if (c.error) return fail(c.error);
       var hasRecords = groupHasRecords(d, groupId);
       if (c.value.cycleId !== grp.cycleId && hasRecords) return fail('이미 체크한 기록이 있어서 주기를 바꿀 수 없어요. 주기 자체를 고치거나 새 묶음을 만드세요.');
       if (c.value.scope !== grp.scope && hasRecords) return fail('이미 체크한 기록이 있어서 범위를 바꿀 수 없어요. 새 묶음을 만드세요.');
@@ -974,8 +987,8 @@
 
     return {
       addGame: addGame, renameGame: renameGame, impactGame: impactGame, deleteGame: deleteGame, moveGame: moveGame,
-      addCycle: addCycle, updateCycle: updateCycle, deleteCycle: deleteCycle,
-      addLevelBelow: addLevelBelow, addLevelAbove: addLevelAbove, renameLevel: renameLevel, impactLevel: impactLevel, deleteLevel: deleteLevel,
+      addCycle: addCycle, updateCycle: updateCycle, canDeleteCycle: canDeleteCycle, deleteCycle: deleteCycle,
+      addLevelBelow: addLevelBelow, addLevelAbove: addLevelAbove, renameLevel: renameLevel, impactLevel: impactLevel, canDeleteLevel: canDeleteLevel, deleteLevel: deleteLevel,
       parseFolderTree: parseFolderTree, addFolders: addFolders, renameFolder: renameFolder, cloneFolder: cloneFolder,
       eligibleParents: eligibleParents, moveFolderTo: moveFolderTo, impactFolder: impactFolder, deleteFolder: deleteFolder,
       moveFolder: moveFolder, folderList: folderList, offList: offList, setOff: setOff,

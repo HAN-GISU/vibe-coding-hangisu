@@ -288,7 +288,7 @@
 
   // 폴더(또는 그 위 폴더)가 itemId(숙제 또는 묶음 id)를 끈 상태인지. 게임 공통(folderId가 null)은 항상 false.
   function isOff(folders, folderId, itemId) {
-    var byId = {};
+    var byId = Object.create(null); // "constructor" 같은 id가 상속 속성에 걸리지 않게
     folders.forEach(function (f) { byId[f.id] = f; });
     var seen = Object.create(null); // 이미 지나간 폴더. 부모가 서로를 가리키는 순환에서 멈춘다.
     var id = folderId;

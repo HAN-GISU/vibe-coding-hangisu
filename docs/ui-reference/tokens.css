@@ -32,6 +32,7 @@
   --sidebar-accent: #262626;      /* 사이드바 선택된 항목 바탕 */
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: rgba(255, 255, 255, 0.10);
+  --overlay: rgba(0, 0, 0, 0.5);  /* Dialog 배경막 (shadcn Dialog의 bg-black/50). 그림자는 쓰지 않는다 */
 
   /* 크기 (dashboard-01에서 잰 값) */
   --radius: 10px;                 /* 버튼, 입력칸 모서리는 이 값 - 2px = 8px */

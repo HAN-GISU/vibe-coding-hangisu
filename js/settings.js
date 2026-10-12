@@ -15,7 +15,6 @@
   /* ---------- 작은 도구 ---------- */
 
   function two(n) { return n < 10 ? '0' + n : String(n); }
-  function clone(x) { return JSON.parse(JSON.stringify(x)); }
 
   function currentGame(d) {
     var found = null;
@@ -57,9 +56,9 @@
   }
 
   function folderPath(g, f) {
-    var byId = {};
+    var byId = Object.create(null);
     g.folders.forEach(function (x) { byId[x.id] = x; });
-    var names = [], seen = {}, cur = f;
+    var names = [], seen = Object.create(null), cur = f;
     while (cur && !seen[cur.id]) { seen[cur.id] = true; names.unshift(cur.name); cur = cur.parentId ? byId[cur.parentId] : null; }
     return names.join(' › ');
   }
@@ -74,9 +73,10 @@
   // 대화상자 밖 작업(위로·아래로 등): 실패하면 페이지 안 안내로 알린다
   function quick(fn) {
     var r = Store.apply(fn);
-    if (!r.ok) { UI.notice(r.error); return; }
+    if (!r.ok) { UI.notice(r.error); return false; }
     UI.notice('');
     render();
+    return true;
   }
 
   // 대화상자 안 작업: 성공하면 다시 그리고, 실패하면 그 오류를 대화상자 안에 보여 준다
@@ -160,7 +160,7 @@
   function editor(d, g) {
     return el('div', { class: 'stack' }, [
       el('div', { class: 'editor-head' }, [el('h2', { text: g.name }), btn('게임 작업', function () { gameSheet(g); })]),
-      cyclesCard(d, g), levelsCard(d, g), foldersCard(d, g), groupsCard(d, g)
+      cyclesCard(g), levelsCard(g), foldersCard(d, g), groupsCard(d, g)
     ]);
   }
 
@@ -201,7 +201,7 @@
 
   /* ---------- 리셋 주기 ---------- */
 
-  function cyclesCard(d, g) {
+  function cyclesCard(g) {
     var body = g.cycles.length
       ? el('ul', { class: 'list' }, g.cycles.map(function (c) {
         return el('li', { class: 'row' }, [
@@ -224,8 +224,7 @@
   }
 
   function deleteCycle(g, c) {
-    var probe = clone(Store.get());
-    var r = O.deleteCycle(probe, g.id, c.id);
+    var r = O.canDeleteCycle(Store.get(), g.id, c.id);
     if (!r.ok) { afterModal(UI.info({ title: '지울 수 없어요', message: r.error })); return; }
     afterModal(UI.confirm({
       title: '리셋 주기를 지울까요?', message: '"' + c.name + '" 주기를 지워요.', confirmLabel: '삭제', danger: true,
@@ -326,7 +325,7 @@
 
   /* ---------- 단계 ---------- */
 
-  function levelsCard(d, g) {
+  function levelsCard(g) {
     var body = g.levels.length
       ? el('ul', { class: 'list' }, g.levels.map(function (name, i) {
         return el('li', { class: 'row' }, [
@@ -364,8 +363,7 @@
 
   // 단계는 폴더도 묶음도 없을 때만 지울 수 있다. 지워지는 기록이 없으므로 "완료 기록도…" 문장은 넣지 않는다.
   function deleteLevel(g, level) {
-    var probe = clone(Store.get());
-    var r = O.deleteLevel(probe, g.id, level);
+    var r = O.canDeleteLevel(Store.get(), g.id, level);
     if (!r.ok) { afterModal(UI.info({ title: '지울 수 없어요', message: r.error })); return; }
     afterModal(UI.confirm({
       title: '단계를 지울까요?', message: '"' + g.levels[level - 1] + '" 단계를 지워요. 이 단계에는 폴더와 묶음이 없어요.', confirmLabel: '삭제', danger: true,
@@ -402,7 +400,7 @@
     if (startLevel > g.levels.length) { afterModal(UI.info({ title: '추가할 수 없어요', message: '이 폴더는 마지막 단계라 아래에 폴더를 추가할 수 없어요.' })); return; }
     linesDialog({
       title: parent ? '"' + parent.name + '" 아래에 폴더 추가' : '폴더 여러 개 추가',
-      description: g.levels[startLevel - 1] + ' 폴더를 한 줄에 하나씩 적어요. 아래 단계는 공백 2칸이나 탭으로 들여써서 적어요.',
+      description: g.levels[startLevel - 1] + ' 폴더를 한 줄에 하나씩 적어요. 아래 단계는 들여써서 적어요. 처음 들여쓴 줄의 공백 수(또는 탭 1개)가 한 단계가 되고, 아래 줄도 같은 칸 수로 맞춰요. 예: 공백 2칸.',
       label: '폴더 이름', placeholder: '본계정\n  캐릭터1\n  캐릭터2\n부계정\n  캐릭터3',
       hint: '빈 줄은 무시해요. 한 번에 500줄까지 추가할 수 있어요.',
       onSubmit: function (text) { return commit(function (d) { return O.addFolders(d, g.id, parent ? parent.id : null, text); }); }
@@ -410,8 +408,6 @@
   }
 
   function folderSheet(g, f) {
-    var d = Store.get();
-    var siblings = O.eligibleParents(d, f.id).length;
     afterModal(UI.sheet({
       title: f.name, description: g.levels[f.level - 1] + ' 폴더',
       actions: [
@@ -419,12 +415,12 @@
           nameDialog({ title: '폴더 이름 바꾸기', label: '폴더 이름', initial: f.name, onSubmit: function (name) { return commit(function (dd) { return O.renameFolder(dd, f.id, name); }); } });
         } },
         f.level < g.levels.length ? { label: '아래에 폴더 추가', onClick: function () { addFolders(g, f); } } : null,
-        { label: '안 하는 것 정하기', onClick: function () { offDialog(g, f); } },
+        { label: '안 하는 것 정하기', onClick: function () { offDialog(f); } },
         { label: '복제 (아래 폴더와 안 하는 것까지)', onClick: function () { quick(function (dd) { return O.cloneFolder(dd, f.id); }); } },
-        f.level >= 2 ? { label: '다른 상위 폴더로 옮기기', onClick: function () { moveDialog(g, f, siblings); } } : null,
+        f.level >= 2 ? { label: '다른 상위 폴더로 옮기기', onClick: function () { moveDialog(g, f); } } : null,
         { label: '위로', onClick: function () { quick(function (dd) { return O.moveFolder(dd, f.id, -1); }); } },
         { label: '아래로', onClick: function () { quick(function (dd) { return O.moveFolder(dd, f.id, 1); }); } },
-        { label: '삭제', danger: true, onClick: function () { deleteFolder(g, f); } }
+        { label: '삭제', danger: true, onClick: function () { deleteFolder(f); } }
       ]
     }));
   }
@@ -444,7 +440,7 @@
   }
 
   // 폴더에서 안 하는 묶음·숙제를 끄는 체크 목록
-  function offDialog(g, f) {
+  function offDialog(f) {
     var d = Store.get();
     var rows = O.offList(d, f.id);
     var boxes = [];
@@ -473,7 +469,7 @@
     }));
   }
 
-  function deleteFolder(g, f) {
+  function deleteFolder(f) {
     var i = O.impactFolder(Store.get(), f.id);
     confirmDelete('폴더를 지울까요?', '"' + f.name + '" 폴더를 지워요. 아래 폴더도 함께 지워져요.',
       [['폴더', i.folders], ['완료 기록', i.records], ['묶음 완료 기록', i.groupRecords]],
@@ -508,11 +504,14 @@
             el('div', { class: 'row-main' }, [el('span', { class: 'row-name', text: t.name })]),
             el('label', { class: 'check' }, [
               el('input', { type: 'checkbox', checked: t.low, onchange: function (e) {
-                var on = e.target.checked;
-                quick(function (dd) { return O.setTaskLow(dd, t.id, on); });
+                var box = e.target, on = box.checked;
+                if (!quick(function (dd) { return O.setTaskLow(dd, t.id, on); })) {
+                  var saved = Store.get().tasks.filter(function (x) { return x.id === t.id; })[0];
+                  box.checked = saved ? saved.low === true : !on; // 저장되지 않았으니 화면도 저장된 값으로
+                }
               } }), '낮음'
             ]),
-            actionBtn(t.name, function () { taskSheet(g, t); })
+            actionBtn(t.name, function () { taskSheet(t); })
           ]);
         }))
         : el('p', { class: 'empty', text: '숙제가 없어요.' }),
@@ -552,8 +551,9 @@
     var reqName = UI.nextId('req');
     var radioAll = el('input', { type: 'radio', name: reqName, checked: v.required === null });
     var radioN = el('input', { type: 'radio', name: reqName, checked: v.required !== null });
-    var reqNum = el('input', { class: 'input', type: 'number', min: '1', step: '1', inputmode: 'numeric', 'aria-label': '필요 개수', value: v.required === null ? '' : String(v.required) });
-    reqNum.addEventListener('focus', function () { radioN.checked = true; });
+    var reqNum = el('input', { class: 'input', type: 'number', min: '1', step: '1', inputmode: 'numeric', 'aria-label': '필요 개수', disabled: v.required === null, value: v.required === null ? '' : String(v.required) });
+    radioAll.addEventListener('change', function () { reqNum.disabled = true; });
+    radioN.addEventListener('change', function () { reqNum.disabled = false; reqNum.focus(); });
     var lowCb = el('input', { type: 'checkbox', checked: v.low });
     var lockHint = locked ? '이미 체크한 기록이 있어서 주기와 범위는 바꿀 수 없어요. 주기 자체를 고치거나 새 묶음을 만드세요.' : null;
 
@@ -592,7 +592,7 @@
     });
   }
 
-  function taskSheet(g, t) {
+  function taskSheet(t) {
     afterModal(UI.sheet({
       title: t.name,
       actions: [
@@ -617,8 +617,9 @@
   UI.mountChrome({ active: 'settings' });
   render();
 
-  // 탭이 다시 보이면 다시 그린다 (다른 탭에서 바뀐 내용 반영). 열려 있는 창이 있으면 건너뛴다.
+  // 탭이 다시 보이면 다시 그린다 (다른 탭에서 바뀐 내용 반영). 열려 있는 창이 있으면 닫힌 뒤에 그린다.
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible' && !UI.isDialogOpen()) render();
+    if (document.visibilityState !== 'visible') return;
+    UI.whenDialogsClosed(render); // 창이 열려 있으면 닫힌 뒤에
   });
 })();

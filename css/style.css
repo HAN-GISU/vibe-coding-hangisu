@@ -32,6 +32,7 @@
   --sidebar-accent: #262626;      /* 사이드바 선택된 항목 바탕 */
   --sidebar-accent-foreground: #fafafa;
   --sidebar-border: rgba(255, 255, 255, 0.10);
+  --overlay: rgba(0, 0, 0, 0.5);  /* Dialog 배경막 (shadcn Dialog의 bg-black/50) */
 
   /* 크기 (dashboard-01에서 잰 값) */
   --radius: 10px;                 /* 버튼, 입력칸 모서리는 이 값 - 2px = 8px */
@@ -160,12 +161,11 @@ a { color: inherit; }
   color: var(--card-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   min-width: 0;
 }
 .card-head { padding: 20px var(--card-padding) 0; }
 .card-title { margin: 0; font-size: 16px; font-weight: 600; }
-.card-desc { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.card-desc { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; overflow-wrap: anywhere; }
 .card-body { padding: 12px var(--card-padding); }
 .card-foot { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 var(--card-padding) 20px; }
 .muted { color: var(--muted-foreground); }
@@ -244,21 +244,26 @@ a { color: inherit; }
 .inline-fields { display: flex; flex-wrap: wrap; gap: 8px; }
 .inline-fields > * { flex: 1; min-width: 90px; }
 .check { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; cursor: pointer; }
-.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
+.check input[type="checkbox"], .check input[type="radio"] { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); }
 .check.disabled { opacity: 0.6; cursor: not-allowed; }
 .inline-fields > .nowrap { flex: none; white-space: nowrap; }
+.inline-fields .check { white-space: nowrap; }
+.inline-fields .check .input { min-width: 0; flex: 1; }
 .choice-list { display: grid; gap: 4px; }
 
 .badge {
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  padding: 0 10px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 2px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 11px;
   color: var(--muted-foreground);
   font-size: var(--font-size-small);
-  white-space: nowrap;
+  line-height: 1.4;
+  overflow-wrap: anywhere; /* 긴 이름이 들어가도 폭을 넘지 않고 줄바꿈한다 */
 }
 
 /* 대화상자 (Dialog) */
@@ -270,16 +275,15 @@ dialog.dlg {
   border-radius: var(--radius-card);
   background: var(--card);
   color: var(--card-foreground);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
-dialog.dlg::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog.dlg::backdrop { background: var(--overlay); }
 .dlg-form { display: flex; flex-direction: column; max-height: calc(100vh - 32px); margin: 0; }
 .dlg-head { padding: 20px var(--card-padding) 0; }
-.dlg-title { margin: 0; font-size: 18px; font-weight: 600; }
-.dlg-desc { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.dlg-title { margin: 0; font-size: 18px; font-weight: 600; overflow-wrap: anywhere; }
+.dlg-desc { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; overflow-wrap: anywhere; }
 .dlg-body { flex: 1; padding: 16px var(--card-padding); overflow-y: auto; }
-.dlg-body p { margin: 0 0 8px; }
+.dlg-body p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .dlg-body p:last-child { margin-bottom: 0; }
 .dlg-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 0 var(--card-padding) 20px; }
 .form-error { margin: 12px 0 0; color: var(--destructive); font-size: 13px; }
