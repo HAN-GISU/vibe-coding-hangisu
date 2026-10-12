@@ -1,0 +1,98 @@
+/*
+ * shadcn/ui 기본 테마(neutral) 값을 일반 CSS 변수로 옮긴 참고 파일.
+ * 출처: https://ui.shadcn.com/view/new-york-v4/dashboard-01 화면에서 2026-10-12에 실제 계산값을 읽어 16진수로 바꿨다.
+ * shadcn/ui는 MIT 라이선스다. 라이브러리 자체는 쓰지 않고 값만 가져온다.
+ * 이 파일은 그대로 css/style.css 맨 위에 복사해 써도 된다.
+ */
+
+/* 어두운 테마 (기본) */
+:root {
+  --background: #0a0a0a;          /* 페이지 바탕 */
+  --foreground: #fafafa;          /* 기본 글자 */
+  --card: #171717;                /* 카드, 사이드바, 대화상자 바탕 */
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --primary: #e5e5e5;             /* 주 버튼 바탕 (밝은 회색) */
+  --primary-foreground: #171717;  /* 주 버튼 글자 */
+  --secondary: #262626;           /* 보조 버튼, 입력칸 바탕 */
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a1a1a1;    /* 보조 글자 (설명, 날짜) */
+  --accent: #404040;              /* 마우스를 올렸을 때 바탕 */
+  --accent-foreground: #fafafa;
+  --destructive: #ff6467;         /* 삭제, 위험, 아주 급함 */
+  --border: rgba(255, 255, 255, 0.10);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #737373;                /* 키보드 포커스 테두리 */
+  --sidebar: #171717;
+  --sidebar-foreground: #fafafa;
+  --sidebar-primary: #1447e6;     /* 사이드바 강조색 (파랑) */
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #262626;      /* 사이드바 선택된 항목 바탕 */
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: rgba(255, 255, 255, 0.10);
+
+  /* 크기 (dashboard-01에서 잰 값) */
+  --radius: 10px;                 /* 버튼, 입력칸 모서리는 이 값 - 2px = 8px */
+  --radius-card: 14px;            /* 카드 모서리 */
+  --sidebar-width: 288px;
+  --header-height: 48px;
+  --page-padding: 24px;           /* 본문 좌우 여백 */
+  --card-padding: 24px;           /* 카드 안쪽 여백 */
+  --gap: 16px;                    /* 카드 사이 간격 */
+  --control-height: 36px;         /* 입력칸, 기본 버튼 높이 */
+  --row-height: 53px;             /* 표 한 줄 높이 */
+  --table-head-height: 40px;
+
+  /* 글꼴: 데모는 Geist지만 한글이 없다. 외부 글꼴은 CLAUDE.md 2-2에 따라 묻고 쓴다. */
+  --font-sans: system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  --font-size-base: 14px;         /* 본문, 버튼, 사이드바 항목 */
+  --font-size-small: 12px;        /* 배지 */
+  --font-size-number: 30px;       /* 카드 큰 숫자 (font-weight 600) */
+}
+
+/* 밝은 테마 값 (참고용. 지금은 쓰지 않는다)
+  --background: #ffffff;  --foreground: #000000;
+  --card: #ffffff;        --card-foreground: #000000;
+  --primary: #000000;     --primary-foreground: #fafafa;
+  --secondary: #f5f5f5;   --muted: #f5f5f5;  --muted-foreground: #737373;
+  --accent: #f5f5f5;      --destructive: #e7000b;
+  --border: #e5e5e5;      --input: #e5e5e5;  --ring: #a1a1a1;
+  --sidebar: #fafafa;     --sidebar-accent: #f5f5f5;  --sidebar-border: #e5e5e5;
+*/
+
+/* 기본 스타일 */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+}
+
+.coming-soon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 100vh;
+  padding: var(--page-padding);
+  text-align: center;
+}
+
+.coming-soon h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.coming-soon p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
