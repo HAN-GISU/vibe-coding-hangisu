@@ -1670,6 +1670,72 @@
       eq('묶음이 없는 게임은 groups가 빈 배열', function () { var d = board(); d.groups = []; d.tasks = []; return eg(d).groups; }, []);
     });
 
+    /* ---------- 5단계: 급한 순서 (Reset.buildUrgent) ---------- */
+    function ug(d, at) { return R.buildUrgent(d.games.map(function (g) { return R.evaluateGame({ game: g, groups: d.groups, tasks: d.tasks, records: d.records, groupRecords: d.groupRecords, at: at || NOON }); })); }
+    function bucket(list, label) { return list.filter(function (b) { return b.label === label; })[0]; }
+    function keys(list, label) { var b = bucket(list, label); return b ? b.items.map(function (i) { return i.key; }) : null; }
+    function addCommon(d, gid, cycleId, taskId, name) {
+      d.groups.push({ id: gid, gameId: 'gm1', name: name || gid, cycleId: cycleId, scope: 'game', required: null, low: false });
+      d.tasks.push({ id: taskId, groupId: gid, name: taskId, low: false, createdAt: '2026-10-01T00:00:00' });
+    }
+
+    suite('급한 순서 (Reset.buildUrgent)', function () {
+      eq('덩어리는 급한 순(17시간 → D-6)이고 "기한 없음"이 맨 아래', function () { return ug(board()).map(function (b) { return b.label; }); }, ['17시간', 'D-6', '기한 없음']);
+      eq('17시간 덩어리: 게임 → 폴더 순서(트리 순서) → 묶음 순', function () { return keys(ug(board()), '17시간'); }, ['gr4/fa1', 'gr1/fc1', 'gr1/fc2', 'gr4/fa2', 'gr1/fc3']);
+      eq('D-6 덩어리: 게임 공통 묶음이 폴더보다 먼저, 이어서 폴더 순', function () { return keys(ug(board()), 'D-6'); }, ['gr3/', 'gr2/fc1', 'gr2/fc2', 'gr2/fc3']);
+      eq('게임 공통 줄은 폴더 경로 자리에 "공통", 폴더 줄은 위 단계부터 "본계정 › 캐릭터1"', function () {
+        var l = ug(board()); var d6 = bucket(l, 'D-6').items; var h = bucket(l, '17시간').items;
+        return [d6[0].pathText, d6[0].common, d6[1].pathText, d6[1].common, h[0].pathText, h[1].pathText];
+      }, ['공통', true, '본계정 › 캐릭터1', false, '본계정', '본계정 › 캐릭터1']);
+      eq('필요 개수가 있는 묶음만 "2개 중 0개"가 붙고 없으면 null, 숙제 이름은 끈 숙제를 뺀다', function () {
+        var d6 = bucket(ug(board()), 'D-6').items; var h = bucket(ug(board()), '17시간').items;
+        return [d6[1].progress, d6[1].taskNames, d6[3].taskNames, d6[0].progress, h[1].progress];
+      }, ['2개 중 0개', ['tk3', 'tk6'], ['tk3', 'tk4', 'tk6'], null, null]);
+      eq('줄 안 정보: 게임 이름과 묶음 이름', function () { var it = bucket(ug(board()), 'D-6').items[1]; return [it.gameName, it.groupName]; }, ['메이플', '주간 레이드']);
+      eq('"기한 없음" 덩어리는 1회 주기 묶음 (sortMs가 가장 크다)', function () { var l = ug(board()); var b = l[l.length - 1]; return [b.label, b.items.map(function (i) { return i.key; }), b.sortMs > l[1].sortMs]; }, ['기한 없음', ['gr5/'], true]);
+      eq('다 한 폴더는 빠진다 (캐릭터1 일일 퀘스트 둘 다 함)', function () { return keys(ug(withRecs(board(), [rc('tk1', 'fc1', TODAY), rc('tk2', 'fc1', TODAY)])), '17시간'); }, ['gr4/fa1', 'gr1/fc2', 'gr4/fa2', 'gr1/fc3']);
+      eq('일부만 한 폴더는 남고 안 한 숙제만 나온다', function () { var it = bucket(ug(withRecs(board(), [rc('tk1', 'fc1', TODAY)])), '17시간').items[1]; return [it.key, it.taskNames]; }, ['gr1/fc1', ['tk2']]);
+      eq('필요 개수를 채운 폴더는 남은 숙제가 있어도 빠지고, 하나 모자라면 남은 숙제와 "2개 중 1개"로 나온다', function () {
+        var full = ug(withRecs(board(), [rc('tk3', 'fc1', TODAY), rc('tk6', 'fc1', TODAY)]));
+        var part = bucket(ug(withRecs(board(), [rc('tk3', 'fc1', TODAY)])), 'D-6').items[1];
+        return [keys(full, 'D-6'), [part.key, part.progress, part.taskNames]];
+      }, [['gr3/', 'gr2/fc2', 'gr2/fc3'], ['gr2/fc1', '2개 중 1개', ['tk6']]]);
+      eq('묶음 완료 기록이 있는 폴더는 빠진다', function () { return keys(ug(withRecs(board(), [], [grc('gr2', 'fc1', TODAY)])), 'D-6'); }, ['gr3/', 'gr2/fc2', 'gr2/fc3']);
+      eq('완료한 게임 공통 묶음은 빠진다', function () { return keys(ug(withRecs(board(), [rc('tk5', null, TODAY)])), 'D-6'); }, ['gr2/fc1', 'gr2/fc2', 'gr2/fc3']);
+      eq('모두 완료돼 항목이 없는 덩어리는 만들어지지 않는다 (기한 없음 완료)', function () { return ug(withRecs(board(), [rc('tk8', null, TODAY)])).map(function (b) { return b.label; }); }, ['17시간', 'D-6']);
+      eq('중요도 낮음 묶음은 통째로 빠진다', function () { var d = board(); d.groups[0].low = true; return keys(ug(d), '17시간'); }, ['gr4/fa1', 'gr4/fa2']);
+      eq('중요도 낮음 숙제만 빠지고, 숙제가 전부 낮음이면 그 줄도 빠진다', function () {
+        var d = board(); d.tasks[0].low = true; var one = bucket(ug(d), '17시간').items.filter(function (i) { return i.key === 'gr1/fc1'; })[0].taskNames;
+        d.tasks[1].low = true; return [one, keys(ug(d), '17시간')];
+      }, [['tk2'], ['gr4/fa1', 'gr4/fa2']]);
+      eq('끈 폴더·끈 숙제는 빠진다 (본계정이 일일 퀘스트를 끔 / 캐릭터3가 숙제 둘을 끔)', function () {
+        var d = board(); d.games[0].folders[0].off = ['gr1']; var a = keys(ug(d), '17시간');
+        var e = board(); e.games[0].folders[4].off = ['tk1', 'tk2']; return [a, keys(ug(e), '17시간')];
+      }, [['gr4/fa1', 'gr4/fa2', 'gr1/fc3'], ['gr4/fa1', 'gr1/fc1', 'gr1/fc2', 'gr4/fa2']]);
+      eq('같은 시간 묶음: 5시간 59분과 5시간 1분은 같은 "5시간" 덩어리, 묶음 순서대로', function () {
+        var d = board(); d.games[0].cycles.push({ id: 'cx', name: 'x', type: 'daily', time: '17:59' }, { id: 'cy', name: 'y', type: 'daily', time: '17:01' });
+        addCommon(d, 'gx', 'cx', 'tx'); addCommon(d, 'gy', 'cy', 'ty');
+        var l = ug(d); return [l.map(function (b) { return b.label; }), keys(l, '5시간')];
+      }, [['5시간', '17시간', 'D-6', '기한 없음'], ['gx/', 'gy/']]);
+      eq('게임이 둘이면 같은 덩어리 안에서 게임 순서대로, 덩어리는 두 게임을 합쳐 급한 순', function () {
+        var d = board();
+        d.games.push({ id: 'gm2', name: '로아', cycles: [{ id: 'c2', name: '일일', type: 'daily', time: '17:30' }], levels: [], folders: [] });
+        d.groups.push({ id: 'h1', gameId: 'gm2', name: '일일', cycleId: 'c2', scope: 'game', required: null, low: false });
+        d.tasks.push({ id: 'ht', groupId: 'h1', name: 'ht', low: false, createdAt: '2026-10-01T00:00:00' });
+        var l = ug(d); return [l.map(function (b) { return b.label; }), bucket(l, '5시간').items.map(function (i) { return i.gameName + ':' + i.pathText; })];
+      }, [['5시간', '17시간', 'D-6', '기한 없음'], ['로아:공통']]);
+      eq('받은 판정 결과를 바꾸지 않는다', function () {
+        var m = eg(board()); var before = JSON.stringify(m.groups.map(function (g) { return [g.ev, g.nodes && g.nodes.map(function (n) { return n.ev; })]; }));
+        R.buildUrgent([m]); return before === JSON.stringify(m.groups.map(function (g) { return [g.ev, g.nodes && g.nodes.map(function (n) { return n.ev; })]; }));
+      }, true);
+      eq('게임이 없거나 묶음이 없으면 빈 목록', function () { var d = board(); d.groups = []; d.tasks = []; return [ug(d), R.buildUrgent([]), R.buildUrgent()]; }, [[], [], []]);
+      eq('리셋 경계: 04:59에는 완료한 캐릭터1이 빠져 있고(1분 덩어리), 05:00 리셋 직후에는 다시 나온다(24시간 덩어리)', function () {
+        var d = withRecs(board(), [rc('tk1', 'fc1', TODAY), rc('tk2', 'fc1', TODAY)]);
+        var before = keys(ug(d, D(10, 16, 4, 59)), '1분'), after = keys(ug(d, D(10, 16, 5, 0)), '24시간');
+        return [before.indexOf('gr1/fc1'), after.indexOf('gr1/fc1') >= 0];
+      }, [-1, true]);
+    });
+
     suite('체크 저장 (checkTask, uncheckTask)', function () {
       var AT = D(10, 15, 12, 0);
       eq('칸 체크: 완료 기록 하나(doneAt 문자열)가 쌓이고 검증을 통과한다', function () {

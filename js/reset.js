@@ -592,6 +592,75 @@
       untilText: formatUntilReset(ms), bucket: bucketOf(ms), changeInMs: msUntilTextChange(ms) };
   }
 
+  /* ---------- 급한 순서 (메인 사이드바) ---------- */
+
+  // evaluateGame 결과 목록(게임 순서대로)에서 "급한 순서" 사이드바 내용을 만든다. 판정은 다시 하지 않는다.
+  // 넣는 것: 안 한 숙제(state 'todo'). 빼는 것: 완료·할 필요 없는 숙제, 중요도 낮음(묶음 또는 숙제), 끈 폴더·끈 숙제.
+  // 돌려주는 값: [{ key, label, sortMs, items: [{ key, gameName, common, pathText, groupName, progress, taskNames }] }]
+  //   덩어리는 sortMs 오름차순("기한 없음"은 맨 아래). 덩어리 안은 게임 → 폴더 경로(게임 공통이 먼저) → 묶음 순.
+  //   progress는 필요 개수가 있는 묶음만 "3개 중 1개", 아니면 null.
+  function buildUrgent(evals) {
+    var buckets = Object.create(null);
+    var order = [];
+    (evals || []).forEach(function (gm, gi) {
+      var folderOrder = Object.create(null);
+      var kids = Object.create(null);
+      gm.game.folders.forEach(function (f) {
+        var k = f.parentId == null ? '' : f.parentId;
+        (kids[k] = kids[k] || []).push(f);
+      });
+      var counter = 0;
+      (function walk(key) { (kids[key] || []).forEach(function (f) { folderOrder[f.id] = counter++; walk(f.id); }); })('');
+
+      gm.groups.forEach(function (gg, ci) {
+        var g = gg.group;
+        if (g.low) return;
+        var rem = gg.remaining;
+        function add(folderId, ev, path) {
+          if (ev.off || ev.empty || ev.done) return;
+          var names = [];
+          ev.tasks.forEach(function (s, i) {
+            if (s.state !== 'todo') return;
+            var t = gg.tasks[i];
+            if (t && !t.low) names.push(t.name);
+          });
+          if (!names.length) return;
+          var b = rem.bucket;
+          if (!buckets[b.key]) { buckets[b.key] = { key: b.key, label: b.label, sortMs: b.sortMs, items: [] }; order.push(b.key); }
+          var hasNeed = isInt(g.required) && g.required >= 1;
+          buckets[b.key].items.push({
+            key: g.id + '/' + (folderId || ''),
+            gameName: gm.game.name,
+            common: folderId === null,
+            pathText: folderId === null ? '공통' : path.join(' › '),
+            groupName: g.name,
+            progress: hasNeed ? ev.need + '개 중 ' + Math.min(ev.doneCount, ev.need) + '개' : null,
+            taskNames: names,
+            _sort: [gi, folderId === null ? -1 : (folderOrder[folderId] === undefined ? 1e9 : folderOrder[folderId]), ci]
+          });
+        }
+        if (gg.kind === 'game') { add(null, gg.ev, []); return; }
+        (gg.nodes || []).forEach(function (n) {
+          if (!n.isRow) return;
+          var path = [], cur = n, seen = Object.create(null);
+          while (cur && !seen[cur.folder.id]) {
+            seen[cur.folder.id] = true;
+            path.unshift(cur.folder.name);
+            cur = cur.parentId == null ? null : gg.byId[cur.parentId];
+          }
+          add(n.folder.id, n.ev, path);
+        });
+      });
+    });
+    return order.map(function (k) { return buckets[k]; })
+      .sort(function (a, b) { return a.sortMs === b.sortMs ? 0 : (a.sortMs < b.sortMs ? -1 : 1); })
+      .map(function (b) {
+        b.items.sort(function (x, y) { return x._sort[0] - y._sort[0] || x._sort[1] - y._sort[1] || x._sort[2] - y._sort[2]; });
+        b.items.forEach(function (it) { delete it._sort; });
+        return b;
+      });
+  }
+
   /* ---------- 화면 갱신 시점 ---------- */
 
   // 남은 시간이 ms일 때, 화면의 글자가 다음에 바뀌기까지 걸리는 시간(ms).
@@ -646,6 +715,7 @@
     formatUntilReset: formatUntilReset,
     bucketOf: bucketOf,
     describeRemaining: describeRemaining,
+    buildUrgent: buildUrgent,
     msUntilTextChange: msUntilTextChange,
     msUntilNextSecond: msUntilNextSecond,
     redrawDelay: redrawDelay
