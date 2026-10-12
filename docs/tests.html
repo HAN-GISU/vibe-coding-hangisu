@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>reset.js 테스트</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    /* 개발용 검증 페이지. 앱 화면이 아니다. 색은 css/style.css의 변수만 쓴다. */
+    .page { max-width: 960px; margin: 0 auto; padding: var(--page-padding); }
+    h1 { margin: 0 0 4px; font-size: 24px; font-weight: 600; }
+    .sub { margin: 0 0 16px; color: var(--muted-foreground); }
+    .summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; padding: 16px 20px;
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); }
+    .summary .big { font-size: 20px; font-weight: 600; }
+    .badge { display: inline-flex; align-items: center; height: 22px; padding: 0 10px; border: 1px solid var(--border);
+      border-radius: 999px; font-size: var(--font-size-small); color: var(--muted-foreground); }
+    .badge.fail { color: var(--destructive); border-color: var(--destructive); }
+    .btn { height: var(--control-height); padding: 0 14px; border: 1px solid var(--input); border-radius: calc(var(--radius) - 2px);
+      background: var(--secondary); color: var(--secondary-foreground); font: inherit; cursor: pointer; }
+    .btn:hover { background: var(--accent); }
+    .nowline { color: var(--muted-foreground); font-size: var(--font-size-small); }
+    .fatal { padding: 16px 20px; border: 1px solid var(--destructive); border-radius: var(--radius-card); color: var(--destructive); }
+    details.suite { margin: 8px 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); }
+    details.suite > summary { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; list-style: none; }
+    details.suite > summary::-webkit-details-marker { display: none; }
+    details.suite > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: var(--radius-card); }
+    .suite-name { font-weight: 600; }
+    ul.cases { margin: 0; padding: 0 16px 12px; list-style: none; }
+    ul.cases li { padding: 4px 0; }
+    .mark { display: inline-block; width: 1.4em; }
+    li.fail { color: var(--destructive); }
+    li.fail pre { margin: 6px 0 4px 1.4em; padding: 8px 12px; background: var(--background); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--foreground); white-space: pre-wrap; word-break: break-all; font-size: 12.5px; }
+    li.pass { color: var(--muted-foreground); }
+    @media (max-width: 600px) { .page { padding: 16px; } }
+  </style>
+</head>
+<body>
+<main class="page">
+  <h1>reset.js 테스트</h1>
+  <p class="sub">개발용 검증 페이지입니다(앱 화면이 아닙니다). 시각은 한국 시간대 기준이고, 테스트는 시각을 직접 넘기므로 <code>?now=</code>의 영향을 받지 않습니다.</p>
+  <div class="summary" id="summary" aria-live="polite">
+    <span class="big" id="sum-text">실행 중…</span>
+    <span class="badge" id="sum-fail" hidden></span>
+    <button class="btn" id="rerun" type="button">다시 실행</button>
+    <span class="nowline" id="nowline"></span>
+  </div>
+  <div id="out"></div>
+</main>
+
+<script src="../js/reset.js"></script>
+<script>
+(function () {
+  'use strict';
+  var out = document.getElementById('out');
+  var R = window.Reset;
+  if (!R) {
+    out.innerHTML = '<div class="fatal">reset.js를 불러오지 못했습니다. 경로(../js/reset.js)를 확인해 주세요.</div>';
+    document.getElementById('sum-text').textContent = '실행하지 못했습니다';
+    window.__testResult = { total: 0, passed: 0, failed: 1, failures: ['reset.js 로드 실패'] };
+    return;
+  }
+
+  /* ---------- 작은 테스트 도구 ---------- */
+  var suites = [];
+  var cur = null;
+  function suite(name, fn) { suites.push({ name: name, fn: fn }); }
+
+  function fmtDate(d) {
+    function p(n) { return String(n).length < 2 ? '0' + n : String(n); }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) +
+      ':' + p(d.getSeconds()) + (d.getMilliseconds() ? '.' + d.getMilliseconds() : '');
+  }
+  function show(v) {
+    if (v === undefined) return 'undefined';
+    if (v === Infinity) return 'Infinity';
+    try {
+      return JSON.stringify(v, function (k, x) {
+        var raw = this[k];
+        if (raw instanceof Date) return fmtDate(raw);
+        if (raw === Infinity) return 'Infinity';
+        return x;
+      }, 1);
+    } catch (e) { return String(v); }
+  }
+  function same(a, b) {
+    if (a instanceof Date || b instanceof Date) return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
+    if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return a === b || (a !== a && b !== b);
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    var ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    return ka.every(function (k) { return Object.prototype.hasOwnProperty.call(b, k) && same(a[k], b[k]); });
+  }
+  // expected에 적힌 키만 비교한다.
+  function covers(a, b) {
+    if (b instanceof Date || a instanceof Date) return same(a, b);
+    if (b === null || typeof b !== 'object' || a === null || typeof a !== 'object') return a === b;
+    if (Array.isArray(b)) return Array.isArray(a) && a.length === b.length && b.every(function (x, i) { return covers(a[i], x); });
+    return Object.keys(b).every(function (k) { return covers(a[k], b[k]); });
+  }
+  function record(name, pass, actual, expected, err) {
+    cur.cases.push({ name: name, pass: pass, actual: actual, expected: expected, err: err });
+  }
+  function run1(name, thunk, expected, cmp) {
+    var actual, err = null;
+    try { actual = thunk(); } catch (e) { err = e; }
+    record(name, !err && cmp(actual, expected), actual, expected, err);
+  }
+  function eq(name, thunk, expected) { run1(name, thunk, expected, same); }
+  function has(name, thunk, expected) { run1(name, thunk, expected, covers); }
+  function ok(name, thunk) { run1(name, thunk, true, same); }
+
+  /* ---------- 자료 만들기 ---------- */
+  function D(m, d, h, mi, s) { return new Date(2026, m - 1, d, h || 0, mi || 0, s || 0); }
+  function Y(y, m, d, h, mi) { return new Date(y, m - 1, d, h || 0, mi || 0); }
+  function M(d, h, m, s) { return (((d * 24 + h) * 60 + m) * 60 + (s || 0)) * 1000; }
+  function rec(taskId, folderId, at) { return { taskId: taskId, folderId: folderId, doneAt: R.formatIso(at) }; }
+  function grec(groupId, folderId, at) { return { groupId: groupId, folderId: folderId, doneAt: R.formatIso(at) }; }
+  function lastNext(c, at) { return [R.lastReset(c, at), R.nextReset(c, at)]; }
+  function task(id, groupId, created) { return { id: id, groupId: groupId, name: id, low: false, createdAt: created || '2026-10-01T00:00' }; }
+  function deepFreeze(o) {
+    if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); Object.keys(o).forEach(function (k) { deepFreeze(o[k]); }); }
+    return o;
+  }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  var daily5 = { id: 'd5', type: 'daily', time: '05:00' };
+  var weeklyThu6 = { id: 'wt6', type: 'weekly', day: 4, time: '06:00' };
+  var weeklyMon5 = { id: 'wm5', type: 'weekly', day: 1, time: '05:00' };
+  var monthly1 = { id: 'm1', type: 'monthly', date: 1, time: '00:00' };
+
+  /* ---------- 시각 읽기·쓰기, now(), ?now= ---------- */
+  suite('시각 읽기·쓰기 (parseTime, formatIso)', function () {
+    eq('"2026-10-15T05:00"은 로컬 시각', function () { return R.parseTime('2026-10-15T05:00'); }, D(10, 15, 5, 0));
+    eq('초와 밀리초를 읽는다', function () { return R.parseTime('2026-10-15T05:00:07.250'); }, new Date(2026, 9, 15, 5, 0, 7, 250));
+    eq('Z가 붙은 시각은 그 순간으로 읽는다', function () { return R.parseTime('2026-10-14T20:00:00Z'); }, new Date(Date.UTC(2026, 9, 14, 20, 0, 0)));
+    eq('없는 날짜(2월 30일)는 null', function () { return R.parseTime('2026-02-30T00:00'); }, null);
+    eq('13월은 null', function () { return R.parseTime('2026-13-01T00:00'); }, null);
+    eq('25시는 null', function () { return R.parseTime('2026-10-15T25:00'); }, null);
+    eq('글자는 null', function () { return R.parseTime('abc'); }, null);
+    eq('null은 null', function () { return R.parseTime(null); }, null);
+    eq('Date는 같은 시각의 복사본', function () { return R.parseTime(D(10, 15, 5, 0)); }, D(10, 15, 5, 0));
+    eq('formatIso: 초까지', function () { return R.formatIso(D(10, 15, 5, 0)); }, '2026-10-15T05:00:00');
+    eq('formatIso: 밀리초가 있으면 붙인다', function () { return R.formatIso(new Date(2026, 9, 15, 5, 0, 0, 250)); }, '2026-10-15T05:00:00.250');
+    eq('formatIso → parseTime 왕복', function () { var d = new Date(2026, 9, 15, 5, 3, 7, 9); return R.parseTime(R.formatIso(d)); }, new Date(2026, 9, 15, 5, 3, 7, 9));
+  });
+
+  suite('now() 와 ?now=', function () {
+    eq('?now= 읽기', function () { return R.parseNowParam('?now=2026-10-15T05:59'); }, D(10, 15, 5, 59));
+    eq('초가 있어도 읽는다', function () { return R.parseNowParam('?now=2026-10-15T05:59:30'); }, D(10, 15, 5, 59, 30));
+    eq('다른 값과 섞여도 읽는다', function () { return R.parseNowParam('?x=1&now=2026-10-15T05:59'); }, D(10, 15, 5, 59));
+    eq('콜론이 %3A로 인코딩돼도 읽는다', function () { return R.parseNowParam('?now=2026-10-15T05%3A59'); }, D(10, 15, 5, 59));
+    eq('now가 없으면 null', function () { return R.parseNowParam('?foo=1'); }, null);
+    eq('빈 문자열은 null', function () { return R.parseNowParam(''); }, null);
+    eq('글자는 null', function () { return R.parseNowParam('?now=abc'); }, null);
+    eq('없는 날짜는 null', function () { return R.parseNowParam('?now=2026-02-30T00:00'); }, null);
+    eq('날짜만 있으면 null', function () { return R.parseNowParam('?now=2026-10-15'); }, null);
+    eq('Z가 붙은 값은 null (로컬 시각만 받는다)', function () { return R.parseNowParam('?now=2026-10-15T05:59:00Z'); }, null);
+    var t0 = 1000000;
+    var clock = R.makeClock(D(10, 15, 5, 59), t0);
+    eq('시계: 시작 시각 그대로', function () { return clock(t0); }, D(10, 15, 5, 59));
+    eq('시계: 90초 뒤는 06:00:30 (시간이 흐른다)', function () { return clock(t0 + 90000); }, D(10, 15, 6, 0, 30));
+    eq('시계: 59분 뒤 리셋 순간을 지난다', function () { var c = R.makeClock(D(10, 15, 4, 59, 58), t0); return R.lastReset(daily5, c(t0 + 1000)).getTime() === D(10, 14, 5, 0).getTime() && R.lastReset(daily5, c(t0 + 2000)).getTime() === D(10, 15, 5, 0).getTime(); }, true);
+    var info = R.nowInfo();
+    ok('nowInfo()에 date, isTest, startedAt, error가 있다', function () { return info.date instanceof Date && 'isTest' in info && 'startedAt' in info && 'error' in info; });
+    ok('now(): ?now=가 없으면 실제 시각, 있으면 시작 시각 이후', function () {
+      var n = R.now().getTime();
+      return info.isTest ? n >= info.startedAt.getTime() : Math.abs(n - Date.now()) < 5000;
+    });
+    ok('nowQuery(): 테스트 시각이면 ?now=…, 아니면 빈 문자열', function () {
+      var q = R.nowQuery();
+      if (!info.isTest) return q === '';
+      var back = R.parseNowParam(q);
+      return !!back && Math.abs(back.getTime() - R.now().getTime()) < 3000;
+    });
+  });
+
+  /* ---------- 리셋 주기 5종 ---------- */
+  suite('매일 05:00', function () {
+    eq('10/15 04:59 → 최근 10/14 05:00, 다음 10/15 05:00', function () { return lastNext(daily5, D(10, 15, 4, 59)); }, [D(10, 14, 5, 0), D(10, 15, 5, 0)]);
+    eq('10/15 05:00 정각은 새 기간', function () { return lastNext(daily5, D(10, 15, 5, 0)); }, [D(10, 15, 5, 0), D(10, 16, 5, 0)]);
+    eq('10/15 05:01', function () { return R.lastReset(daily5, D(10, 15, 5, 1)); }, D(10, 15, 5, 0));
+    eq('04:59:59.999도 아직 이전 기간', function () { return R.lastReset(daily5, new Date(2026, 9, 15, 4, 59, 59, 999)); }, D(10, 14, 5, 0));
+    eq('23:59 → 다음 10/16 05:00', function () { return lastNext(daily5, D(10, 15, 23, 59)); }, [D(10, 15, 5, 0), D(10, 16, 5, 0)]);
+    eq('다음날 00:00 → 최근 10/15 05:00', function () { return R.lastReset(daily5, D(10, 16, 0, 0)); }, D(10, 15, 5, 0));
+    eq('달 경계: 11/01 04:59 → [10/31 05:00, 11/01 05:00]', function () { return lastNext(daily5, D(11, 1, 4, 59)); }, [D(10, 31, 5, 0), D(11, 1, 5, 0)]);
+    eq('해 경계: 2026-12-31 23:59 → 다음 2027-01-01 05:00', function () { return R.nextReset(daily5, Y(2026, 12, 31, 23, 59)); }, Y(2027, 1, 1, 5, 0));
+    eq('7장 메이플 일일 00:00: 10/14 23:59 → [10/14 00:00, 10/15 00:00]', function () { return lastNext({ type: 'daily', time: '00:00' }, D(10, 14, 23, 59)); }, [D(10, 14, 0, 0), D(10, 15, 0, 0)]);
+    eq('7장 메이플 일일 00:00: 10/15 00:00 정각', function () { return R.lastReset({ type: 'daily', time: '00:00' }, D(10, 15, 0, 0)); }, D(10, 15, 0, 0));
+    eq('7장 로스트아크·작혼 일일 06:00: 05:59 / 06:00', function () { var c = { type: 'daily', time: '06:00' }; return [R.lastReset(c, D(10, 15, 5, 59)), R.lastReset(c, D(10, 15, 6, 0))]; }, [D(10, 14, 6, 0), D(10, 15, 6, 0)]);
+  });
+
+  suite('매주', function () {
+    eq('목 06:00: 10/14(수) 23:59 → [10/08 06:00, 10/15 06:00]', function () { return lastNext(weeklyThu6, D(10, 14, 23, 59)); }, [D(10, 8, 6, 0), D(10, 15, 6, 0)]);
+    eq('목 06:00: 10/15(목) 05:59는 아직 이전 기간', function () { return lastNext(weeklyThu6, D(10, 15, 5, 59)); }, [D(10, 8, 6, 0), D(10, 15, 6, 0)]);
+    eq('목 06:00: 10/15 06:00 정각', function () { return lastNext(weeklyThu6, D(10, 15, 6, 0)); }, [D(10, 15, 6, 0), D(10, 22, 6, 0)]);
+    eq('목 06:00: 10/15 06:01', function () { return R.lastReset(weeklyThu6, D(10, 15, 6, 1)); }, D(10, 15, 6, 0));
+    eq('목 06:00: 10/16(금)', function () { return R.lastReset(weeklyThu6, D(10, 16, 12, 0)); }, D(10, 15, 6, 0));
+    eq('수 06:00 (로스트아크): 10/14 05:59 → 최근 10/07', function () { return R.lastReset({ type: 'weekly', day: 3, time: '06:00' }, D(10, 14, 5, 59)); }, D(10, 7, 6, 0));
+    eq('수 06:00 (로스트아크): 10/14 06:00 정각 → 최근 10/14', function () { return R.lastReset({ type: 'weekly', day: 3, time: '06:00' }, D(10, 14, 6, 0)); }, D(10, 14, 6, 0));
+    eq('일(0) 00:00: 10/10(토) 23:59 → 최근 10/04', function () { return R.lastReset({ type: 'weekly', day: 0, time: '00:00' }, D(10, 10, 23, 59)); }, D(10, 4, 0, 0));
+    eq('일(0) 00:00: 10/11(일) 00:00 → 최근 10/11', function () { return R.lastReset({ type: 'weekly', day: 0, time: '00:00' }, D(10, 11, 0, 0)); }, D(10, 11, 0, 0));
+    eq('7장 메이플 목 00:00: 11/02(월) 00:00 → 최근 10/29 (달 경계)', function () { return R.lastReset({ type: 'weekly', day: 4, time: '00:00' }, D(11, 2, 0, 0)); }, D(10, 29, 0, 0));
+    eq('7장 메이플 목 00:00: 10/14 23:59 / 10/15 00:00', function () { var c = { type: 'weekly', day: 4, time: '00:00' }; return [R.lastReset(c, D(10, 14, 23, 59)), R.lastReset(c, D(10, 15, 0, 0))]; }, [D(10, 8, 0, 0), D(10, 15, 0, 0)]);
+    eq('월 05:00: 10/12(월) 12:00 → [10/12 05:00, 10/19 05:00]', function () { return lastNext(weeklyMon5, D(10, 12, 12, 0)); }, [D(10, 12, 5, 0), D(10, 19, 5, 0)]);
+  });
+
+  suite('매월 (1~28일)', function () {
+    eq('매월 1일 00:00: 10/31 23:59 → [10/01, 11/01]', function () { return lastNext(monthly1, D(10, 31, 23, 59)); }, [D(10, 1, 0, 0), D(11, 1, 0, 0)]);
+    eq('매월 1일 00:00: 11/01 00:00 정각', function () { return lastNext(monthly1, D(11, 1, 0, 0)); }, [D(11, 1, 0, 0), D(12, 1, 0, 0)]);
+    eq('매월 1일 00:00: 11/01 00:01', function () { return R.lastReset(monthly1, D(11, 1, 0, 1)); }, D(11, 1, 0, 0));
+    eq('30일 달: 9/30 23:59 → 다음 10/01', function () { return R.nextReset(monthly1, D(9, 30, 23, 59)); }, D(10, 1, 0, 0));
+    eq('31일 달: 10/31 23:59 → 다음 11/01', function () { return R.nextReset(monthly1, D(10, 31, 23, 59)); }, D(11, 1, 0, 0));
+    eq('해 경계: 2026-12-31 23:59 → 다음 2027-01-01', function () { return R.nextReset(monthly1, Y(2026, 12, 31, 23, 59)); }, Y(2027, 1, 1, 0, 0));
+    eq('해 경계: 2027-01-01 00:00 → 최근 2027-01-01', function () { return R.lastReset(monthly1, Y(2027, 1, 1, 0, 0)); }, Y(2027, 1, 1, 0, 0));
+    eq('1월 1일 이전 날짜 2026-01-15 → 최근 01/01', function () { return R.lastReset(monthly1, Y(2026, 1, 15, 12, 0)); }, Y(2026, 1, 1, 0, 0));
+    eq('평년 2월: 2027-02-28 23:59 → 다음 03/01', function () { return R.nextReset(monthly1, Y(2027, 2, 28, 23, 59)); }, Y(2027, 3, 1, 0, 0));
+    eq('윤년 2월: 2028-02-29 12:00 → [02/01, 03/01]', function () { return lastNext(monthly1, Y(2028, 2, 29, 12, 0)); }, [Y(2028, 2, 1, 0, 0), Y(2028, 3, 1, 0, 0)]);
+    var m28 = { type: 'monthly', date: 28, time: '00:00' };
+    eq('매월 28일: 2027-02-27 → [01/28, 02/28]', function () { return lastNext(m28, Y(2027, 2, 27, 12, 0)); }, [Y(2027, 1, 28, 0, 0), Y(2027, 2, 28, 0, 0)]);
+    eq('매월 28일: 2027-03-01 → 최근 02/28', function () { return R.lastReset(m28, Y(2027, 3, 1, 0, 0)); }, Y(2027, 2, 28, 0, 0));
+    eq('매월 15일 06:30: 10/15 06:29 → 최근 09/15', function () { return R.lastReset({ type: 'monthly', date: 15, time: '06:30' }, D(10, 15, 6, 29)); }, D(9, 15, 6, 30));
+  });
+
+  suite('간격', function () {
+    var every14 = { type: 'interval', anchor: '2026-10-01T05:00', every: { days: 14 } };
+    eq('14일마다(기준 10/01 05:00): 10/15 04:59 → [10/01 05:00, 10/15 05:00]', function () { return lastNext(every14, D(10, 15, 4, 59)); }, [D(10, 1, 5, 0), D(10, 15, 5, 0)]);
+    eq('14일마다: 10/15 05:00 정각', function () { return lastNext(every14, D(10, 15, 5, 0)); }, [D(10, 15, 5, 0), D(10, 29, 5, 0)]);
+    eq('14일마다: 10/29 05:00', function () { return R.lastReset(every14, D(10, 29, 5, 0)); }, D(10, 29, 5, 0));
+    eq('14일마다: 기준 시각 정각', function () { return R.lastReset(every14, D(10, 1, 5, 0)); }, D(10, 1, 5, 0));
+    eq('기준 이전에도 거꾸로 이어진다: 9/30 12:00 → [09/17 05:00, 10/01 05:00]', function () { return lastNext(every14, D(9, 30, 12, 0)); }, [D(9, 17, 5, 0), D(10, 1, 5, 0)]);
+    var every6h = { type: 'interval', anchor: '2026-10-12T05:30', every: { hours: 6 } };
+    eq('6시간마다(기준 10/12 05:30): 11:29 → 최근 05:30', function () { return R.lastReset(every6h, D(10, 12, 11, 29)); }, D(10, 12, 5, 30));
+    eq('6시간마다: 11:30 정각 → 최근 11:30', function () { return R.lastReset(every6h, D(10, 12, 11, 30)); }, D(10, 12, 11, 30));
+    eq('6시간마다: 23:59 → [23:30, 10/13 05:30]', function () { return lastNext(every6h, D(10, 12, 23, 59)); }, [D(10, 12, 23, 30), D(10, 13, 5, 30)]);
+    eq('6시간마다: 기준 이전 05:29 → [10/11 23:30, 10/12 05:30]', function () { return lastNext(every6h, D(10, 12, 5, 29)); }, [D(10, 11, 23, 30), D(10, 12, 5, 30)]);
+    var every45m = { type: 'interval', anchor: '2026-10-12T05:30', every: { minutes: 45 } };
+    eq('45분마다: 06:14 → [05:30, 06:15]', function () { return lastNext(every45m, D(10, 12, 6, 14)); }, [D(10, 12, 5, 30), D(10, 12, 6, 15)]);
+    eq('45분마다: 06:15 정각 → 최근 06:15', function () { return R.lastReset(every45m, D(10, 12, 6, 15)); }, D(10, 12, 6, 15));
+    var every36 = { type: 'interval', anchor: '2026-10-01T05:00', every: { days: 1, hours: 12, minutes: 30 } };
+    eq('1일 12시간 30분마다: 10/02 17:29 → 최근 10/01 05:00', function () { return R.lastReset(every36, D(10, 2, 17, 29)); }, D(10, 1, 5, 0));
+    eq('1일 12시간 30분마다: 10/02 17:30 정각 → 최근 10/02 17:30', function () { return R.lastReset(every36, D(10, 2, 17, 30)); }, D(10, 2, 17, 30));
+    eq('1일 12시간 30분마다: 다음 경계는 10/04 06:00', function () { return R.nextReset(every36, D(10, 2, 17, 30)); }, D(10, 4, 6, 0));
+  });
+
+  suite('1회', function () {
+    var once = { type: 'once' };
+    eq('lastReset은 null', function () { return R.lastReset(once, D(10, 15, 12, 0)); }, null);
+    eq('nextReset은 null', function () { return R.nextReset(once, D(10, 15, 12, 0)); }, null);
+    eq('currentPeriod는 둘 다 null', function () { return R.currentPeriod(once, D(10, 15, 12, 0)); }, { start: null, end: null });
+    eq('remainingMs는 null', function () { return R.remainingMs(once, D(10, 15, 12, 0)); }, null);
+    eq('기록이 없으면 미완료', function () { return R.isTaskDone({ cycle: once, taskId: 't', folderId: null, records: [], at: D(10, 15, 12, 0) }); }, false);
+    eq('아주 오래전 기록도 완료', function () { return R.isTaskDone({ cycle: once, taskId: 't', folderId: null, records: [rec('t', null, D(1, 1, 0, 0))], at: D(10, 15, 12, 0) }); }, true);
+    eq('listPeriods는 기간 하나', function () { return R.listPeriods(once, '2026-09-01T00:00', D(10, 15, 12, 0)); }, [{ start: null, end: null, isCurrent: true }]);
+  });
+
+  suite('주기 검사 (validateCycle)', function () {
+    var good = [daily5, weeklyThu6, monthly1, { type: 'interval', anchor: '2026-10-01T05:00', every: { days: 14 } },
+      { type: 'interval', anchor: '2026-10-12T05:30', every: { minutes: 45 } }, { type: 'once' },
+      { type: 'daily', time: '00:00' }, { type: 'daily', time: '06:00' }, { type: 'weekly', day: 0, time: '23:59' }, { type: 'monthly', date: 28, time: '00:00' }];
+    good.forEach(function (c, i) {
+      ok('올바른 주기 ' + (i + 1) + ' (' + c.type + ')', function () { return R.validateCycle(c).ok === true; });
+    });
+    var bad = [
+      ['객체가 아님', null], ['모르는 종류', { type: 'yearly' }], ['시각 25:00', { type: 'daily', time: '25:00' }],
+      ['시각 5:0', { type: 'daily', time: '5:0' }], ['시각 없음', { type: 'daily' }], ['요일 7', { type: 'weekly', day: 7, time: '05:00' }],
+      ['요일이 정수가 아님', { type: 'weekly', day: 1.5, time: '05:00' }], ['날짜 0', { type: 'monthly', date: 0, time: '00:00' }],
+      ['날짜 29', { type: 'monthly', date: 29, time: '00:00' }], ['기준 시각 읽기 실패', { type: 'interval', anchor: 'abc', every: { days: 1 } }],
+      ['간격이 전부 0', { type: 'interval', anchor: '2026-10-01T05:00', every: { days: 0, hours: 0, minutes: 0 } }],
+      ['간격이 음수', { type: 'interval', anchor: '2026-10-01T05:00', every: { days: -1 } }],
+      ['간격 없음', { type: 'interval', anchor: '2026-10-01T05:00' }],
+      ['carry의 since가 until보다 늦음', { type: 'daily', time: '05:00', carry: { since: '2026-10-16T05:00', until: '2026-10-15T05:00' } }]
+    ];
+    bad.forEach(function (b) {
+      ok('잘못된 주기 거부: ' + b[0], function () { var r = R.validateCycle(b[1]); return r.ok === false && typeof r.error === 'string' && r.error.length > 0; });
+    });
+  });
+
+  /* ---------- 주기를 바꿔도 체크 유지 (carry) ---------- */
+  suite('주기 변경 후 체크 유지 (changeCycle, carry)', function () {
+    function done(c, rs, at) { return R.isTaskDone({ cycle: c, taskId: 't', folderId: null, records: rs, at: at }); }
+    var c1 = D(10, 15, 5, 30);
+    var newLater = { id: 'd5', type: 'daily', time: '05:20' };
+    var carried = R.changeCycle(daily5, newLater, c1);
+    var rs = [rec('t', null, D(10, 15, 5, 10))];
+    eq('carry 값: since=변경 직전의 최근 리셋, until=새 주기의 다음 리셋', function () { return carried.carry; }, { since: '2026-10-15T05:00:00', until: '2026-10-16T05:20:00' });
+    eq('주기 시각 05:00 → 05:20, 05:30에 변경, 05:10 기록: 변경 직후 완료 유지', function () { return done(carried, rs, c1); }, true);
+    eq('같은 경우 1시간 뒤(06:30)에도 완료 유지', function () { return done(carried, rs, D(10, 15, 6, 30)); }, true);
+    eq('같은 경우 다음날 05:19까지 유지', function () { return done(carried, rs, D(10, 16, 5, 19)); }, true);
+    eq('같은 경우 다음날 05:20(새 주기의 리셋)에는 미완료', function () { return done(carried, rs, D(10, 16, 5, 20)); }, false);
+    eq('대조: carry가 없으면 같은 경우에 체크가 사라진다', function () { return done(newLater, rs, c1); }, false);
+    eq('carry 만든 뒤에도 입력 주기 객체는 그대로', function () { return 'carry' in newLater; }, false);
+
+    var earlier = { id: 'd4', type: 'daily', time: '04:00' };
+    var c2 = D(10, 15, 4, 30);
+    var carried2 = R.changeCycle(daily5, earlier, c2);
+    var rs2 = [rec('t', null, D(10, 14, 10, 0))];
+    eq('05:00 → 04:00, 04:30에 변경, 10/14 10:00 기록: 변경 직후 완료 유지', function () { return done(carried2, rs2, c2); }, true);
+    eq('같은 경우 1시간 뒤(05:30)에도 완료 유지', function () { return done(carried2, rs2, D(10, 15, 5, 30)); }, true);
+    eq('같은 경우 10/16 03:59까지 유지', function () { return done(carried2, rs2, D(10, 16, 3, 59)); }, true);
+    eq('같은 경우 10/16 04:00에는 미완료', function () { return done(carried2, rs2, D(10, 16, 4, 0)); }, false);
+    eq('대조: carry가 없으면 같은 경우에 체크가 사라진다', function () { return done(earlier, rs2, c2); }, false);
+    eq('체크가 없던 숙제는 변경 후에도 미완료 (되살아나지 않는다)', function () { return [done(carried2, [], c2), done(carried2, [], D(10, 15, 5, 30)), done(carried2, [rec('t', null, D(10, 13, 10, 0))], D(10, 15, 5, 30))]; }, [false, false, false]);
+    eq('새 주기에서 변경 뒤에 한 체크는 정상으로 센다', function () { return done(carried2, [rec('t', null, D(10, 15, 4, 40))], D(10, 15, 12, 0)); }, true);
+
+    var c3 = D(10, 14, 12, 0); // 수요일
+    var wOld = { id: 'w', type: 'weekly', day: 4, time: '06:00' };
+    var wNew = { id: 'w', type: 'weekly', day: 5, time: '06:00' };
+    var wc = R.changeCycle(wOld, wNew, c3);
+    var wrs = [rec('t', null, D(10, 10, 12, 0))]; // 지난 목요일(10/8) 06:00 이후에 한 체크
+    eq('매주 목 06:00 → 금 06:00, 수요일에 변경: 지난 체크가 유지된다', function () { return [done(wc, wrs, c3), done(wc, wrs, D(10, 15, 7, 0)), done(wc, wrs, D(10, 16, 5, 59))]; }, [true, true, true]);
+    eq('같은 경우 새 주기의 리셋(금 10/16 06:00)에 미완료', function () { return done(wc, wrs, D(10, 16, 6, 0)); }, false);
+
+    var twice = R.changeCycle(carried, { id: 'd5', type: 'daily', time: '05:40' }, D(10, 15, 5, 35));
+    eq('연속으로 두 번 바꿔도 첫 since가 이어진다', function () { return twice.carry.since; }, '2026-10-15T05:00:00');
+    eq('연속으로 두 번 바꾼 뒤에도 05:10 체크 유지', function () { return done(twice, rs, D(10, 15, 5, 36)); }, true);
+
+    var onceToDaily = R.changeCycle({ type: 'once' }, daily5, D(10, 15, 12, 0));
+    eq('1회 → 매일: 이미 한 체크는 다음 리셋까지 유지', function () { return [done(onceToDaily, [rec('t', null, D(9, 1, 0, 0))], D(10, 15, 13, 0)), done(onceToDaily, [rec('t', null, D(9, 1, 0, 0))], D(10, 16, 5, 0))]; }, [true, false]);
+    eq('매일 → 1회: carry를 만들지 않는다', function () { return 'carry' in R.changeCycle(daily5, { type: 'once' }, D(10, 15, 12, 0)); }, false);
+    ok('carry가 붙은 주기도 validateCycle을 통과한다', function () { return R.validateCycle(carried).ok === true; });
+    eq('nextReset은 carry의 영향을 받지 않는다', function () { return R.nextReset(carried, D(10, 15, 6, 0)); }, D(10, 16, 5, 20));
+  });
+
+  /* ---------- 폴더 ---------- */
+  var F = [
+    { id: 'a1', parentId: null, level: 1, name: '본계정', off: ['tD'] },
+    { id: 'c1', parentId: 'a1', level: 2, name: '캐릭터1', off: [] },
+    { id: 'c2', parentId: 'a1', level: 2, name: '캐릭터2', off: [] },
+    { id: 'a2', parentId: null, level: 1, name: '부계정', off: [] },
+    { id: 'c3', parentId: 'a2', level: 2, name: '캐릭터3', off: [] }
+  ];
+
+  suite('폴더: 끄기와 묶음 적용 범위', function () {
+    eq('위 폴더(본계정)가 끈 숙제는 그 아래 캐릭터1도 끈 것', function () { return R.isOff(F, 'c1', 'tD'); }, true);
+    eq('캐릭터2도 끈 것', function () { return R.isOff(F, 'c2', 'tD'); }, true);
+    eq('다른 계정(부계정) 아래 캐릭터3은 끄지 않았다', function () { return R.isOff(F, 'c3', 'tD'); }, false);
+    eq('끄지 않은 숙제', function () { return R.isOff(F, 'c1', 'tA'); }, false);
+    eq('게임 공통(folderId가 null)은 항상 false', function () { return R.isOff(F, null, 'tD'); }, false);
+    eq('없는 폴더 id는 false', function () { return R.isOff(F, 'zzz', 'tD'); }, false);
+    eq('아래 폴더가 끈 것은 위 폴더에 영향이 없다', function () { var f2 = clone(F); f2[1].off = ['tX']; return [R.isOff(f2, 'c1', 'tX'), R.isOff(f2, 'a1', 'tX'), R.isOff(f2, 'c2', 'tX')]; }, [true, false, false]);
+    eq('foldersForGroup: 범위 2(캐릭터)이면 그 단계 폴더 전부', function () { return R.foldersForGroup({ scope: 2 }, F).map(function (f) { return f.id; }); }, ['c1', 'c2', 'c3']);
+    eq('foldersForGroup: 범위 1(계정)', function () { return R.foldersForGroup({ scope: 1 }, F).map(function (f) { return f.id; }); }, ['a1', 'a2']);
+    eq('foldersForGroup: 게임 공통은 []', function () { return R.foldersForGroup({ scope: 'game' }, F); }, []);
+    eq('새 폴더를 단계에 추가하면 그 묶음에 자동으로 들어온다', function () { var f2 = clone(F); f2.push({ id: 'c4', parentId: 'a2', level: 2, name: '캐릭터4', off: [] }); return R.foldersForGroup({ scope: 2 }, f2).length; }, 4);
+  });
+
+  /* ---------- 완료 판정, 묶음 ---------- */
+  suite('숙제 완료 판정 (isTaskDone)', function () {
+    function done(c, rs, at, folderId, taskId) { return R.isTaskDone({ cycle: c, taskId: taskId || 't', folderId: folderId === undefined ? null : folderId, records: rs, at: at }); }
+    eq('매일 05:00, 기록 10/14 21:00: 10/15 04:59는 완료', function () { return done(daily5, [rec('t', null, D(10, 14, 21, 0))], D(10, 15, 4, 59)); }, true);
+    eq('같은 기록: 10/15 05:00 정각은 미완료 (리셋)', function () { return done(daily5, [rec('t', null, D(10, 14, 21, 0))], D(10, 15, 5, 0)); }, false);
+    eq('기록 시각이 리셋 시각과 같으면 완료', function () { return done(daily5, [rec('t', null, D(10, 15, 5, 0))], D(10, 15, 5, 0)); }, true);
+    eq('며칠 건너뛰고 접속(기록 10/10 21:00, 10/15 12:00): 미완료', function () { return done(daily5, [rec('t', null, D(10, 10, 21, 0))], D(10, 15, 12, 0)); }, false);
+    eq('그날 새 기록을 더하면 완료', function () { return done(daily5, [rec('t', null, D(10, 10, 21, 0)), rec('t', null, D(10, 15, 12, 0))], D(10, 15, 12, 30)); }, true);
+    eq('주간 목 06:00: 수요일 기록은 목요일 06:00 이후 미완료', function () { return [done(weeklyThu6, [rec('t', null, D(10, 14, 22, 0))], D(10, 15, 5, 59)), done(weeklyThu6, [rec('t', null, D(10, 14, 22, 0))], D(10, 15, 6, 0))]; }, [true, false]);
+    eq('다른 숙제의 기록은 세지 않는다', function () { return done(daily5, [rec('other', null, D(10, 15, 6, 0))], D(10, 15, 12, 0)); }, false);
+    eq('폴더: 캐릭터1이 해도 캐릭터2는 미완료', function () { var rs = [rec('t', 'c1', D(10, 15, 6, 0))]; return [done(daily5, rs, D(10, 15, 12, 0), 'c1'), done(daily5, rs, D(10, 15, 12, 0), 'c2'), done(daily5, rs, D(10, 15, 12, 0), null)]; }, [true, false, false]);
+    eq('게임 공통(null)과 undefined는 같은 것으로 본다', function () { var rs = [{ taskId: 't', doneAt: R.formatIso(D(10, 15, 6, 0)) }]; return done(daily5, rs, D(10, 15, 12, 0), null); }, true);
+  });
+
+  suite('묶음 완료 (evaluateGroup)', function () {
+    var tasks3 = [task('tA', 'g'), task('tB', 'g'), task('tC', 'g')];
+    var tasks5 = ['t1', 't2', 't3', 't4', 't5'].map(function (id) { return task(id, 'g'); });
+    var at = D(10, 15, 12, 0);
+    function ev(over) {
+      return R.evaluateGroup(Object.assign({ group: { id: 'g', scope: 'game', required: null }, cycle: daily5, tasks: tasks3, folders: F,
+        folderId: null, records: [], groupRecords: [], at: at }, over));
+    }
+    function states(e) { return e.tasks.map(function (t) { return t.state; }); }
+    var today = D(10, 15, 6, 0);
+
+    has('필요 개수 null, 숙제 3개, 2개 완료: 미완료 (need 3)', function () { return ev({ records: [rec('tA', null, today), rec('tB', null, today)] }); }, { done: false, doneCount: 2, need: 3, total: 3, empty: false });
+    eq('같은 경우 상태: done, done, todo', function () { return states(ev({ records: [rec('tA', null, today), rec('tB', null, today)] })); }, ['done', 'done', 'todo']);
+    has('3개 완료: 완료', function () { return ev({ records: [rec('tA', null, today), rec('tB', null, today), rec('tC', null, today)] }); }, { done: true, doneCount: 3, need: 3 });
+    has('필요 개수 2, 숙제 5개, 1개 완료: 미완료 (하나 모자람)', function () { return ev({ group: { id: 'g', scope: 'game', required: 2 }, tasks: tasks5, records: [rec('t1', null, today)] }); }, { done: false, doneCount: 1, need: 2, total: 5 });
+    has('필요 개수 2, 숙제 5개, 2개 완료: 완료 (딱 맞음)', function () { return ev({ group: { id: 'g', scope: 'game', required: 2 }, tasks: tasks5, records: [rec('t1', null, today), rec('t3', null, today)] }); }, { done: true, doneCount: 2, need: 2 });
+    eq('완료되면 한 숙제는 done, 나머지는 skipped(회색)', function () { return states(ev({ group: { id: 'g', scope: 'game', required: 2 }, tasks: tasks5, records: [rec('t1', null, today), rec('t3', null, today)] })); }, ['done', 'skipped', 'done', 'skipped', 'skipped']);
+    eq('필요 개수보다 더 해도 done으로 남고 doneCount는 실제 개수', function () { var e = ev({ group: { id: 'g', scope: 'game', required: 2 }, tasks: tasks5, records: [rec('t1', null, today), rec('t2', null, today), rec('t3', null, today)] }); return [e.done, e.doneCount, e.need]; }, [true, 3, 2]);
+    has('오늘 1개 + 어제 1개: 오늘은 1개로 센다', function () { return ev({ group: { id: 'g', scope: 'game', required: 2 }, tasks: tasks5, records: [rec('t1', null, today), rec('t2', null, D(10, 14, 21, 0))] }); }, { done: false, doneCount: 1 });
+    eq('doneAt이 상태에 담긴다', function () { return ev({ records: [rec('tA', null, today)] }).tasks[0].doneAt; }, today);
+
+    var weeklyTasks = ['w1', 'w2', 'w3', 'w4'].map(function (id) { return task(id, 'g'); });
+    var wGroup = { id: 'g', scope: 2, required: 3 };
+    function wev(over) { return R.evaluateGroup(Object.assign({ group: wGroup, cycle: weeklyThu6, tasks: weeklyTasks, folders: F, folderId: 'c1', records: [], groupRecords: [], at: D(10, 16, 12, 0) }, over)); }
+    has('묶음 완료 기록(필요 개수 3): 완료, 개별 기록 0개', function () { return wev({ groupRecords: [grec('g', 'c1', D(10, 15, 7, 0))] }); }, { done: true, byGroupRecord: true, doneCount: 0, need: 3 });
+    eq('같은 경우 남은 숙제 4개는 모두 skipped', function () { return states(wev({ groupRecords: [grec('g', 'c1', D(10, 15, 7, 0))] })); }, ['skipped', 'skipped', 'skipped', 'skipped']);
+    eq('캐릭터1의 묶음 기록은 캐릭터2에 영향이 없다', function () { return wev({ folderId: 'c2', groupRecords: [grec('g', 'c1', D(10, 15, 7, 0))] }).done; }, false);
+    eq('다음 리셋(10/22 06:00)이 지나면 묶음 기록은 지난 기간이라 미완료', function () { return wev({ at: D(10, 22, 6, 0), groupRecords: [grec('g', 'c1', D(10, 15, 7, 0))] }).done; }, false);
+    eq('리셋 직전(10/22 05:59)에는 묶음 기록이 유지된다', function () { return wev({ at: D(10, 22, 5, 59), groupRecords: [grec('g', 'c1', D(10, 15, 7, 0))] }).done; }, true);
+    eq('다른 묶음의 묶음 기록은 세지 않는다', function () { return wev({ groupRecords: [grec('other', 'c1', D(10, 15, 7, 0))] }).done; }, false);
+
+    var fourTasks = ['tA', 'tB', 'tC', 'tD'].map(function (id) { return task(id, 'g'); });
+    var fGroup = { id: 'g', scope: 2, required: null };
+    function fev(folderId, over) { return R.evaluateGroup(Object.assign({ group: fGroup, cycle: daily5, tasks: fourTasks, folders: F, folderId: folderId, records: [], groupRecords: [], at: at }, over)); }
+    has('본계정이 끈 숙제(tD): 캐릭터1의 숙제 수에서 빠진다 (total 3)', function () { return fev('c1'); }, { total: 3, need: 3, empty: false });
+    eq('끈 숙제는 state off', function () { return states(fev('c1')); }, ['todo', 'todo', 'todo', 'off']);
+    has('캐릭터2도 total 3 (아래 폴더 전부에 적용)', function () { return fev('c2'); }, { total: 3 });
+    has('부계정 아래 캐릭터3은 total 4', function () { return fev('c3'); }, { total: 4, need: 4 });
+    eq('끈 숙제를 뺀 나머지 3개를 하면 캐릭터1 완료', function () { return fev('c1', { records: [rec('tA', 'c1', today), rec('tB', 'c1', today), rec('tC', 'c1', today)] }).done; }, true);
+    eq('같은 기록이어도 캐릭터2는 미완료 (폴더마다 따로 센다)', function () { return fev('c2', { records: [rec('tA', 'c1', today), rec('tB', 'c1', today), rec('tC', 'c1', today)] }).done; }, false);
+    eq('끈 숙제의 기록은 세지 않는다', function () { return fev('c1', { records: [rec('tD', 'c1', today)] }).doneCount; }, 0);
+    eq('폴더마다 필요 개수를 따로 센다 (필요 2): 캐릭터1은 2개 완료, 캐릭터2는 1개', function () {
+      var g = { id: 'g', scope: 2, required: 2 };
+      var rs = [rec('tA', 'c1', today), rec('tB', 'c1', today), rec('tA', 'c2', today)];
+      return [fev('c1', { group: g, records: rs }).done, fev('c2', { group: g, records: rs }).done];
+    }, [true, false]);
+    var offGroupFolders = clone(F); offGroupFolders[0].off = ['g'];
+    has('폴더가 묶음 전체를 끄면 off:true, 판정 대상이 아니다', function () { return fev('c1', { folders: offGroupFolders }); }, { off: true, empty: true, done: false, total: 0 });
+    eq('같은 설정에서 부계정 아래는 영향이 없다', function () { return fev('c3', { folders: offGroupFolders }).off; }, false);
+    var twoOff = clone(F); twoOff[0].off = ['tC', 'tD'];
+    has('필요 개수 3인데 활성 숙제가 2개면 need는 2', function () { return fev('c1', { group: { id: 'g', scope: 2, required: 3 }, folders: twoOff }); }, { total: 2, need: 2 });
+    has('숙제가 없는 묶음은 empty (완료도 미완료도 아니다)', function () { return ev({ tasks: [] }); }, { empty: true, done: false, need: 0, total: 0 });
+    has('숙제가 전부 꺼진 묶음도 empty', function () { var f = clone(F); f[0].off = ['tA', 'tB', 'tC']; return ev({ folders: f, folderId: 'c1' }); }, { empty: true, done: false });
+    has('필요 개수가 0이나 음수면 전부 해야 완료로 본다', function () { return ev({ group: { id: 'g', scope: 'game', required: 0 } }); }, { need: 3 });
+    eq('다른 묶음의 숙제는 섞이지 않는다', function () { return ev({ tasks: tasks3.concat([task('x', 'other')]) }).total; }, 3);
+  });
+
+  /* ---------- 지난 기간 ---------- */
+  suite('지난 기간 나누기 (listPeriods)', function () {
+    var at = D(10, 12, 12, 0);
+    var ps = R.listPeriods(weeklyMon5, '2026-09-30T00:00', at);
+    eq('매주 월 05:00, 숙제 생성 9/30: 기간 3개 (현재, 10/05~, 09/28~)', function () { return ps.length; }, 3);
+    eq('시작 시각(최신순)', function () { return ps.map(function (p) { return p.start; }); }, [D(10, 12, 5, 0), D(10, 5, 5, 0), D(9, 28, 5, 0)]);
+    eq('끝 시각', function () { return ps.map(function (p) { return p.end; }); }, [D(10, 19, 5, 0), D(10, 12, 5, 0), D(10, 5, 5, 0)]);
+    eq('현재 기간만 isCurrent', function () { return ps.map(function (p) { return p.isCurrent; }); }, [true, false, false]);
+    eq('숙제를 만들기 전 기간(09/21~09/28)은 빠진다', function () { return ps.some(function (p) { return p.start.getTime() === D(9, 21, 5, 0).getTime(); }); }, false);
+    eq('생성 시각이 기간 시작과 같으면(10/05 05:00) 그 기간부터', function () { return R.listPeriods(weeklyMon5, '2026-10-05T05:00', at).length; }, 2);
+    eq('생성 시각이 지금이면 현재 기간 하나', function () { return R.listPeriods(weeklyMon5, R.formatIso(at), at).length; }, 1);
+    eq('생성 시각이 미래여도 현재 기간 하나', function () { return R.listPeriods(weeklyMon5, '2026-12-01T00:00', at).length; }, 1);
+    eq('매일 05:00, 생성 10/10 12:00, 지금 10/12 12:00: 3개', function () { return R.listPeriods(daily5, '2026-10-10T12:00', at).length; }, 3);
+    eq('분 단위 주기는 1000개로 끊는다', function () { return R.listPeriods({ type: 'interval', anchor: '2026-10-01T00:00', every: { minutes: 1 } }, '2026-10-01T00:00', at).length; }, 1000);
+    eq('주기 경계는 carry의 영향을 받지 않는다', function () { return R.listPeriods(R.changeCycle(weeklyMon5, { id: 'x', type: 'weekly', day: 1, time: '06:00' }, at), '2026-10-05T05:00', at).map(function (p) { return p.start; })[0]; }, D(10, 12, 6, 0));
+  });
+
+  suite('지난 기간 함/안함 (periodStatus)', function () {
+    var P = { start: D(10, 5, 5, 0), end: D(10, 12, 5, 0) };
+    var tasks = [task('T1', 'g', '2026-09-30T00:00'), task('T2', 'g', '2026-09-30T00:00'), task('T3', 'g', '2026-09-30T00:00')];
+    var group = { id: 'g', scope: 'game', required: 2 };
+    function st(taskId, over) {
+      var t = tasks.filter(function (x) { return x.id === taskId; })[0];
+      return R.periodStatus(Object.assign({ group: group, task: t, tasks: tasks, folders: F, folderId: null, records: [], groupRecords: [], period: P }, over));
+    }
+    has('기록 10/07 21:13이면 함 (그 시각이 담긴다)', function () { return st('T1', { records: [rec('T1', null, D(10, 7, 21, 13))] }); }, { status: 'done', doneAt: D(10, 7, 21, 13) });
+    has('기록이 없으면 안함', function () { return st('T1'); }, { status: 'missed', doneAt: null });
+    has('필요 2개 중 1개만 하면 나머지는 놓친 것(안함)', function () { return st('T2', { records: [rec('T1', null, D(10, 6, 12, 0))] }); }, { status: 'missed' });
+    has('필요 2개를 채웠으면 안 한 숙제는 안함 (묶음 달성)', function () { return st('T3', { records: [rec('T1', null, D(10, 6, 12, 0)), rec('T2', null, D(10, 8, 12, 0))] }); }, { status: 'missed-group-met' });
+    has('기간 끝 직전(10/12 04:59) 기록은 이 기간', function () { return st('T1', { records: [rec('T1', null, D(10, 12, 4, 59))] }); }, { status: 'done' });
+    has('기간 끝 정각(10/12 05:00) 기록은 다음 기간이라 이 기간은 안함', function () { return st('T1', { records: [rec('T1', null, D(10, 12, 5, 0))] }); }, { status: 'missed' });
+    has('기간 시작 정각(10/05 05:00) 기록은 이 기간', function () { return st('T1', { records: [rec('T1', null, D(10, 5, 5, 0))] }); }, { status: 'done' });
+    has('묶음을 통째로 체크했으면 묶음 체크로 완료', function () { return st('T2', { groupRecords: [grec('g', null, D(10, 9, 12, 0))] }); }, { status: 'group-checked' });
+    has('묶음 체크가 있어도 개별로 한 숙제는 함', function () { return st('T1', { records: [rec('T1', null, D(10, 6, 12, 0))], groupRecords: [grec('g', null, D(10, 9, 12, 0))] }); }, { status: 'done' });
+    has('기간 끝 이후에 만든 숙제는 none', function () { var late = [task('T9', 'g', '2026-10-13T00:00')]; return R.periodStatus({ group: group, task: late[0], tasks: late, folders: F, folderId: null, records: [], groupRecords: [], period: P }); }, { status: 'none' });
+    has('폴더가 끈 숙제는 off', function () { var gp = { id: 'g', scope: 2, required: null }; var t = [task('tD', 'g', '2026-09-30T00:00')]; return R.periodStatus({ group: gp, task: t[0], tasks: t, folders: F, folderId: 'c1', records: [], groupRecords: [], period: P }); }, { status: 'off' });
+    has('폴더마다 따로: 캐릭터1이 했어도 캐릭터2는 안함', function () { var gp = { id: 'g', scope: 2, required: null }; var t = [task('tA', 'g', '2026-09-30T00:00')]; var rs = [rec('tA', 'c1', D(10, 6, 12, 0))]; return R.periodStatus({ group: gp, task: t[0], tasks: t, folders: F, folderId: 'c2', records: rs, groupRecords: [], period: P }); }, { status: 'missed' });
+    has('그 기간 이전에 만든 숙제만 필요 개수에 센다 (T3을 10/13에 만들었으면 총 2개)', function () {
+      var ts = [task('T1', 'g', '2026-09-30T00:00'), task('T2', 'g', '2026-09-30T00:00'), task('T3', 'g', '2026-10-13T00:00')];
+      var gp = { id: 'g', scope: 'game', required: null };
+      return R.evaluateGroup({ group: gp, tasks: ts, folders: F, folderId: null, records: [rec('T1', null, D(10, 6, 12, 0)), rec('T2', null, D(10, 7, 12, 0))], groupRecords: [], period: P });
+    }, { total: 2, need: 2, done: true });
+    has('1회 주기 묶음: 지난 기간이 없으니 기록 하나면 완료', function () { return R.evaluateGroup({ group: { id: 'g', scope: 'game', required: null }, cycle: { type: 'once' }, tasks: [task('T1', 'g')], folders: F, folderId: null, records: [rec('T1', null, D(1, 1, 0, 0))], groupRecords: [], at: D(10, 15, 12, 0) }); }, { done: true });
+  });
+
+  suite('불변성: 받은 객체를 바꾸지 않는다', function () {
+    var cyc = deepFreeze(clone(weeklyThu6));
+    var folders = deepFreeze(clone(F));
+    var tasks = deepFreeze([task('tA', 'g'), task('tB', 'g')]);
+    var records = deepFreeze([rec('tA', 'c1', D(10, 15, 7, 0))]);
+    var groupRecords = deepFreeze([grec('g', 'c1', D(10, 15, 7, 0))]);
+    var group = deepFreeze({ id: 'g', scope: 2, required: 1 });
+    var before = JSON.stringify([cyc, folders, tasks, records, groupRecords, group]);
+    ok('evaluateGroup, periodStatus, listPeriods, changeCycle, isOff를 불러도 예외가 없고 내용이 그대로다', function () {
+      R.evaluateGroup({ group: group, cycle: cyc, tasks: tasks, folders: folders, folderId: 'c1', records: records, groupRecords: groupRecords, at: D(10, 16, 12, 0) });
+      R.periodStatus({ group: group, task: tasks[0], tasks: tasks, folders: folders, folderId: 'c1', records: records, groupRecords: groupRecords, period: R.currentPeriod(cyc, D(10, 16, 12, 0)) });
+      R.listPeriods(cyc, '2026-09-30T00:00', D(10, 16, 12, 0));
+      R.changeCycle(cyc, { id: 'x', type: 'daily', time: '05:00' }, D(10, 16, 12, 0));
+      R.isOff(folders, 'c1', 'tD');
+      R.isTaskDone({ cycle: cyc, taskId: 'tA', folderId: 'c1', records: records, at: D(10, 16, 12, 0) });
+      return JSON.stringify([cyc, folders, tasks, records, groupRecords, group]) === before;
+    });
+    eq('리셋 시점을 지나가도(at을 옮겨도) 기록 개수가 줄지 않는다', function () {
+      var lens = [D(10, 15, 12, 0), D(10, 22, 5, 59), D(10, 22, 6, 0), D(10, 29, 12, 0)].map(function (at) {
+        R.isTaskDone({ cycle: cyc, taskId: 'tA', folderId: 'c1', records: records, at: at });
+        return records.length;
+      });
+      return lens;
+    }, [1, 1, 1, 1]);
+  });
+
+  /* ---------- 남은 기간 표시 ---------- */
+  suite('남은 기간 (remainingMs, describeRemaining)', function () {
+    eq('매일 05:00, 10/15 04:59 → 60000ms', function () { return R.remainingMs(daily5, D(10, 15, 4, 59)); }, 60000);
+    eq('매일 05:00, 10/15 05:00 → 24시간', function () { return R.remainingMs(daily5, D(10, 15, 5, 0)); }, M(1, 0, 0, 0));
+    has('describeRemaining: 04:59에는 "1분"', function () { return R.describeRemaining(daily5, D(10, 15, 4, 59)); }, { text: '1분', kind: 'minutes', untilText: '리셋까지 1분', changeInMs: 1 });
+    has('describeRemaining: 04:59:18에는 "42초", 같은 초 묶음 S42', function () { return R.describeRemaining(daily5, D(10, 15, 4, 59, 18)); }, { text: '42초', kind: 'seconds', bucket: { key: 'S42', label: '42초' } });
+    has('describeRemaining: 1회는 "기한 없음"', function () { return R.describeRemaining({ type: 'once' }, D(10, 15, 4, 59)); }, { ms: null, text: '기한 없음', untilText: '기한 없음', kind: 'none', bucket: { key: 'none' } });
+    eq('describeRemaining: 1회는 changeInMs가 Infinity, sortMs도 Infinity', function () { var d = R.describeRemaining({ type: 'once' }, D(10, 15, 4, 59)); return [d.changeInMs, d.bucket.sortMs]; }, [Infinity, Infinity]);
+  });
+
+  suite('남은 기간 표시 (formatRemaining)', function () {
+    function f(ms) { var r = R.formatRemaining(ms); return [r.kind, r.label, r.text]; }
+    eq('48시간 1분 → D-2', function () { return f(M(2, 0, 1, 0)); }, ['dday', 'D-2', 'D-2 · 2일']);
+    eq('2일 20시간 → D-2 · 2일 20시간', function () { return f(M(2, 20, 0, 0)); }, ['dday', 'D-2', 'D-2 · 2일 20시간']);
+    eq('3일 5시간 → D-3', function () { return f(M(3, 5, 0, 0)); }, ['dday', 'D-3', 'D-3 · 3일 5시간']);
+    eq('정확히 48시간 → D-2', function () { return f(M(2, 0, 0, 0)); }, ['dday', 'D-2', 'D-2 · 2일']);
+    eq('47시간 59분 → 47시간 59분', function () { return f(M(1, 23, 59, 0)); }, ['hours', '47시간 59분', '47시간 59분']);
+    eq('47시간 59분 59초도 47시간 59분 (초는 버린다)', function () { return f(M(1, 23, 59, 59)); }, ['hours', '47시간 59분', '47시간 59분']);
+    eq('35시간 10분', function () { return f(M(1, 11, 10, 0)); }, ['hours', '35시간 10분', '35시간 10분']);
+    eq('정확히 24시간 → 24시간', function () { return f(M(1, 0, 0, 0)); }, ['hours', '24시간', '24시간']);
+    eq('5시간 12분', function () { return f(M(0, 5, 12, 0)); }, ['hours', '5시간 12분', '5시간 12분']);
+    eq('1시간 → 1시간', function () { return f(M(0, 1, 0, 0)); }, ['hours', '1시간', '1시간']);
+    eq('59분 59초 → 59분', function () { return f(M(0, 0, 59, 59)); }, ['minutes', '59분', '59분']);
+    eq('59분 → 59분', function () { return f(M(0, 0, 59, 0)); }, ['minutes', '59분', '59분']);
+    eq('42분', function () { return f(M(0, 0, 42, 0)); }, ['minutes', '42분', '42분']);
+    eq('정확히 1분 → 1분', function () { return f(60000); }, ['minutes', '1분', '1분']);
+    eq('59초 999 → 59초', function () { return f(59999); }, ['seconds', '59초', '59초']);
+    eq('42초', function () { return f(42000); }, ['seconds', '42초', '42초']);
+    eq('42.5초도 42초 (내림)', function () { return f(42500); }, ['seconds', '42초', '42초']);
+    eq('1초 → 1초', function () { return f(1000); }, ['seconds', '1초', '1초']);
+    eq('1초 미만 → 0초', function () { return f(999); }, ['seconds', '0초', '0초']);
+    has('D-day의 n, detail', function () { return R.formatRemaining(M(2, 20, 0, 0)); }, { n: 2, detail: '2일 20시간' });
+  });
+
+  suite('리셋까지 문구 (formatUntilReset)', function () {
+    eq('3일 → 리셋까지 3일', function () { return R.formatUntilReset(M(3, 0, 0, 0)); }, '리셋까지 3일');
+    eq('3일 23시간 → 리셋까지 3일', function () { return R.formatUntilReset(M(3, 23, 0, 0)); }, '리셋까지 3일');
+    eq('2일 → 리셋까지 2일', function () { return R.formatUntilReset(M(2, 0, 0, 0)); }, '리셋까지 2일');
+    eq('47시간 59분 → 리셋까지 47시간', function () { return R.formatUntilReset(M(1, 23, 59, 0)); }, '리셋까지 47시간');
+    eq('20시간 → 리셋까지 20시간', function () { return R.formatUntilReset(M(0, 20, 0, 0)); }, '리셋까지 20시간');
+    eq('30분 → 리셋까지 30분', function () { return R.formatUntilReset(M(0, 0, 30, 0)); }, '리셋까지 30분');
+    eq('42초 → 리셋까지 42초', function () { return R.formatUntilReset(42000); }, '리셋까지 42초');
+  });
+
+  suite('사이드바 묶음 단위 (bucketOf)', function () {
+    function k(ms) { return R.bucketOf(ms).key; }
+    eq('5시간 59분과 5시간 1분은 같은 묶음 H5', function () { return [k(M(0, 5, 59, 0)), k(M(0, 5, 1, 0))]; }, ['H5', 'H5']);
+    eq('5시간 정각과 4시간 59분은 다른 묶음', function () { return [k(M(0, 5, 0, 0)), k(M(0, 4, 59, 0))]; }, ['H5', 'H4']);
+    eq('47시간 59분은 H47, 48시간은 D2', function () { return [k(M(1, 23, 59, 0)), k(M(2, 0, 0, 0))]; }, ['H47', 'D2']);
+    eq('2일 23시간 59분도 D2, 3일은 D3', function () { return [k(M(2, 23, 59, 0)), k(M(3, 0, 0, 0))]; }, ['D2', 'D3']);
+    eq('59분 50초와 59분 10초는 같은 M59', function () { return [k(M(0, 0, 59, 50)), k(M(0, 0, 59, 10))]; }, ['M59', 'M59']);
+    eq('42분과 59분은 다른 묶음', function () { return [k(M(0, 0, 42, 0)), k(M(0, 0, 59, 0))]; }, ['M42', 'M59']);
+    eq('1시간은 H1, 1분은 M1', function () { return [k(M(0, 1, 0, 0)), k(60000)]; }, ['H1', 'M1']);
+    eq('1분 미만은 같은 초: 42.1초와 42.9초는 S42', function () { return [k(42100), k(42900), k(41900)]; }, ['S42', 'S42', 'S41']);
+    eq('라벨: D-2 / 5시간 / 42분 / 42초', function () { return [R.bucketOf(M(2, 20, 0, 0)).label, R.bucketOf(M(0, 5, 12, 0)).label, R.bucketOf(M(0, 0, 42, 0)).label, R.bucketOf(42000).label]; }, ['D-2', '5시간', '42분', '42초']);
+    eq('sortMs는 급할수록 작다 (정렬하면 42초 < 5분 < 5시간 < D-2)', function () {
+      var list = [M(2, 20, 0, 0), M(0, 5, 12, 0), 42000, M(0, 0, 5, 0)];
+      return list.slice().sort(function (a, b) { return R.bucketOf(a).sortMs - R.bucketOf(b).sortMs; }).map(function (ms) { return R.bucketOf(ms).label; });
+    }, ['42초', '5분', '5시간', 'D-2']);
+  });
+
+  /* ---------- 화면 갱신 시점 ---------- */
+  suite('화면 갱신 시점 (msUntilTextChange, redrawDelay)', function () {
+    eq('59분 30초 남음 → 분이 바뀌는 30초 뒤(+1ms)', function () { return R.msUntilTextChange(M(0, 0, 59, 30)); }, 30001);
+    eq('42초 500ms 남음 → 500ms 뒤 초가 바뀐다(+1ms)', function () { return R.msUntilTextChange(42500); }, 501);
+    eq('정확히 42초 남음 → 1ms 뒤', function () { return R.msUntilTextChange(42000); }, 1);
+    eq('61초 남음 → 1분이 59초로 바뀌는 1001ms 뒤', function () { return R.msUntilTextChange(61000); }, 1001);
+    eq('정확히 1분 남음 → 1ms 뒤 (59초로 바뀜)', function () { return R.msUntilTextChange(60000); }, 1);
+    eq('5시간 12분 30초 남음 → 30001ms', function () { return R.msUntilTextChange(M(0, 5, 12, 30)); }, 30001);
+    eq('48시간 30분 남음(D-2 구간) → 시간 단위: 30분 + 1ms', function () { return R.msUntilTextChange(M(2, 0, 30, 0)); }, 1800001);
+    eq('48시간 + 2ms 남음 → 2ms 뒤에 47시간 59분으로 바뀐다', function () { return R.msUntilTextChange(M(2, 0, 0, 0) + 1); }, 2);
+    eq('3일 5시간 10분 남음 → 10분 + 1ms', function () { return R.msUntilTextChange(M(3, 5, 10, 0)); }, 600001);
+    eq('리셋까지 500ms 남음 → 리셋 시각(500ms)을 넘지 않는다', function () { return R.msUntilTextChange(500); }, 500);
+    eq('리셋까지 0ms → 0', function () { return R.msUntilTextChange(0); }, 0);
+    eq('1회(null) → Infinity', function () { return R.msUntilTextChange(null); }, Infinity);
+    eq('실제로 그 시간만큼 지나면 글자가 바뀐다 (여러 값)', function () {
+      return [M(0, 5, 12, 30), 42500, 61000, M(0, 0, 59, 30), M(2, 0, 30, 0), M(3, 5, 10, 0), 60000, M(2, 0, 0, 0) + 1].map(function (ms) {
+        var before = R.formatRemaining(ms).text;
+        var after = R.formatRemaining(ms - R.msUntilTextChange(ms)).text;
+        var justBefore = R.formatRemaining(ms - R.msUntilTextChange(ms) + 1).text;
+        return before !== after || R.msUntilTextChange(ms) === ms ? (justBefore === before || R.msUntilTextChange(ms) === 1) : false;
+      }).every(Boolean);
+    }, true);
+    eq('redrawDelay: 목록이 비면 60초', function () { return R.redrawDelay([]); }, 60000);
+    eq('redrawDelay: 1회(null)만 있으면 60초', function () { return R.redrawDelay([null]); }, 60000);
+    eq('redrawDelay: 시간 단위만 있으면 60초 상한 (5시간 12분 30초 → 30001ms)', function () { return R.redrawDelay([M(0, 5, 12, 30)]); }, 30001);
+    eq('redrawDelay: 3일 5시간 30분 남음(다음 변화가 30분 뒤)이면 60초로 줄인다', function () { return R.redrawDelay([M(3, 5, 30, 0)]); }, 60000);
+    eq('redrawDelay: 정각(3일 5시간 정확히)이면 1ms 뒤에 바뀐다', function () { return R.redrawDelay([M(3, 5, 0, 0)]); }, 1);
+    eq('redrawDelay: 초가 보이는 값이 있으면 그 초가 바뀔 때 (42.5초 → 501ms)', function () { return R.redrawDelay([M(0, 5, 12, 30), 42500, null]); }, 501);
+    eq('redrawDelay: 리셋이 곧이면 리셋 시각', function () { return R.redrawDelay([300, M(0, 5, 12, 30)]); }, 300);
+    eq('redrawDelay: maxMs 지정', function () { return R.redrawDelay([M(3, 5, 30, 0)], 5000); }, 5000);
+    eq('redrawDelay: 지났으면 최소 1ms', function () { return R.redrawDelay([0]); }, 1);
+  });
+
+  /* ---------- 실행과 화면 ---------- */
+  function runAll() {
+    out.textContent = '';
+    var total = 0, passed = 0, failures = [];
+    suites.forEach(function (s) {
+      cur = { name: s.name, cases: [] };
+      try { s.fn(); } catch (e) { record('(묶음 실행 중 예외)', false, undefined, undefined, e); }
+      var p = cur.cases.filter(function (c) { return c.pass; }).length;
+      total += cur.cases.length;
+      passed += p;
+
+      var d = document.createElement('details');
+      d.className = 'suite';
+      d.open = p !== cur.cases.length;
+      var sm = document.createElement('summary');
+      var nm = document.createElement('span'); nm.className = 'suite-name'; nm.textContent = s.name;
+      var bd = document.createElement('span'); bd.className = 'badge' + (p === cur.cases.length ? '' : ' fail'); bd.textContent = p + ' / ' + cur.cases.length;
+      sm.appendChild(nm); sm.appendChild(bd); d.appendChild(sm);
+      var ul = document.createElement('ul'); ul.className = 'cases';
+      cur.cases.forEach(function (c) {
+        var li = document.createElement('li');
+        li.className = c.pass ? 'pass' : 'fail';
+        var mark = document.createElement('span'); mark.className = 'mark'; mark.textContent = c.pass ? '✓' : '✗';
+        li.appendChild(mark); li.appendChild(document.createTextNode(c.name));
+        if (!c.pass) {
+          failures.push(s.name + ' › ' + c.name);
+          var pre = document.createElement('pre');
+          pre.textContent = '기대값: ' + show(c.expected) + '\n실제값: ' + (c.err ? '예외 — ' + (c.err && c.err.message) : show(c.actual));
+          li.appendChild(pre);
+        }
+        ul.appendChild(li);
+      });
+      d.appendChild(ul);
+      out.appendChild(d);
+    });
+
+    var failed = total - passed;
+    document.getElementById('sum-text').textContent = '전체 ' + total + '개 중 통과 ' + passed + ' · 실패 ' + failed;
+    var fb = document.getElementById('sum-fail');
+    fb.hidden = failed === 0;
+    fb.className = 'badge fail';
+    fb.textContent = '실패 ' + failed;
+    document.title = (failed ? '(실패 ' + failed + ') ' : '') + 'reset.js 테스트';
+    var info = R.nowInfo();
+    document.getElementById('nowline').textContent = '현재 시각 ' + fmtDate(info.date) + (info.isTest ? ' (테스트 시각)' : '') + (info.error ? ' · ' + info.error : '');
+    window.__testResult = { total: total, passed: passed, failed: failed, failures: failures };
+  }
+
+  document.getElementById('rerun').addEventListener('click', runAll);
+  window.runAll = runAll;
+  runAll();
+})();
+</script>
+</body>
+</html>
